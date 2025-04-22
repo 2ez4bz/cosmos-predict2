@@ -35,13 +35,10 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--diffusion_transformer_dir",
         type=str,
-        default="Cosmos-Predict1-7B-Text2World",
+        default="Cosmos-Predict2-14B-Text2World",
         help="DiT model weights directory name relative to checkpoint_dir",
         choices=[
-            "Cosmos-Predict1-7B-Text2World",
-            "Cosmos-Predict1-14B-Text2World",
-            "Cosmos-Predict1-7B-Text2World_post-trained",
-            "Cosmos-Predict1-14B-Text2World_post-trained",
+            "Cosmos-Predict2-14B-Text2World",
         ],
     )
     parser.add_argument(

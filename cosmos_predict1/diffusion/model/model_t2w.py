@@ -178,8 +178,10 @@ class DiffusionT2WModel(torch.nn.Module):
             xt_scaled = self.scheduler.scale_model_input(xt, timestep=t)
             # Predict the noise residual
             t = t.to(**self.tensor_kwargs)
-            net_output_cond = self.net(x=xt_scaled, timesteps=t, **condition.to_dict())
-            net_output_uncond = self.net(x=xt_scaled, timesteps=t, **uncondition.to_dict())
+            ones_B = torch.ones(xt_scaled.size(0), device=xt_scaled.device, dtype=t.dtype)
+            t = t * ones_B
+            net_output_cond = self.net(x_B_C_T_H_W=xt_scaled, timesteps_B_T=t, **condition.to_dict())
+            net_output_uncond = self.net(x_B_C_T_H_W=xt_scaled, timesteps_B_T=t, **uncondition.to_dict())
             net_output = net_output_cond + guidance * (net_output_cond - net_output_uncond)
             # Compute the previous noisy sample x_t -> x_t-1
             xt = self.scheduler.step(net_output, t, xt).prev_sample

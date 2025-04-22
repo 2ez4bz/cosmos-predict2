@@ -42,6 +42,34 @@ FADITV2Config: LazyDict = L(GeneralDIT)(
     adaln_lora_dim=256,
 )
 
+COSMOS_PREDICT2_NETConfig: LazyDict = L(GeneralDIT)(
+    max_img_h=240,
+    max_img_w=240,
+    max_frames=128,
+    in_channels=16,
+    out_channels=16,
+    patch_spatial=2,
+    patch_temporal=1,
+    model_channels=5120,
+    block_config="FA-CA-MLP",
+    num_blocks=36,
+    num_heads=40,
+    concat_padding_mask=True,
+    pos_emb_cls="rope3d",
+    pos_emb_learnable=False,
+    pos_emb_interpolation="crop",
+    block_x_format="THWBD",
+    affline_emb_norm=True,
+    use_adaln_lora=True,
+    adaln_lora_dim=256,
+    min_fps=1,
+    max_fps=30,
+    rope_h_extrapolation_ratio=2.0,
+    rope_w_extrapolation_ratio=2.0,
+    rope_t_extrapolation_ratio=20 / 24
+    extra_per_block_abs_pos_emb=False,
+    rope_enable_fps_modulation=False,
+)
 
 FADITV2_14B_Config = copy.deepcopy(FADITV2Config)
 FADITV2_14B_Config.model_channels = 5120

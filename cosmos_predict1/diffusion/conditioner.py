@@ -93,8 +93,8 @@ class TextAttr(BaseConditionEntry):
     def __init__(self):
         super().__init__()
 
-    def forward(self, token: torch.Tensor, mask: torch.Tensor):
-        return {"crossattn_emb": token, "crossattn_mask": mask}
+    def forward(self, token: torch.Tensor):
+        return {"crossattn_emb": token}
 
     def random_dropout_input(
         self, in_tensor: torch.Tensor, dropout_rate: Optional[float] = None, key: Optional[str] = None
@@ -107,7 +107,6 @@ class TextAttr(BaseConditionEntry):
 @dataclass
 class BaseVideoCondition:
     crossattn_emb: torch.Tensor
-    crossattn_mask: torch.Tensor
     data_type: DataType = DataType.VIDEO
     padding_mask: Optional[torch.Tensor] = None
     fps: Optional[torch.Tensor] = None

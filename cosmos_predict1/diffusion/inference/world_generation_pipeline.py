@@ -51,16 +51,17 @@ from cosmos_predict1.utils import log
 from cosmos_predict1.utils.base_world_generation_pipeline import BaseWorldGenerationPipeline
 
 MODEL_NAME_DICT = {
-    "Cosmos-Predict1-7B-Text2World": "Cosmos_Predict1_Text2World_7B",
-    "Cosmos-Predict1-14B-Text2World": "Cosmos_Predict1_Text2World_14B",
-    "Cosmos-Predict1-7B-Video2World": "Cosmos_Predict1_Video2World_7B",
-    "Cosmos-Predict1-14B-Video2World": "Cosmos_Predict1_Video2World_14B",
-    "Cosmos-Predict1-7B-Text2World_post-trained": "Cosmos_Predict1_Text2World_7B_Post_trained",
-    "Cosmos-Predict1-14B-Text2World_post-trained": "Cosmos_Predict1_Text2World_14B_Post_trained",
-    "Cosmos-Predict1-7B-Video2World_post-trained": "Cosmos_Predict1_Video2World_7B_Post_trained",
-    "Cosmos-Predict1-14B-Video2World_post-trained": "Cosmos_Predict1_Video2World_14B_Post_trained",
-    "Cosmos-Predict1-7B-Text2World-Sample-AV-Multiview": "Cosmos_Predict1_Text2World_7B_Multiview",
-    "Cosmos-Predict1-7B-Video2World-Sample-AV-Multiview": "Cosmos_Predict1_Video2World_7B_Multiview",
+    # "Cosmos-Predict1-7B-Text2World": "Cosmos_Predict1_Text2World_7B",
+    # "Cosmos-Predict1-14B-Text2World": "Cosmos_Predict1_Text2World_14B",
+    # "Cosmos-Predict1-7B-Video2World": "Cosmos_Predict1_Video2World_7B",
+    # "Cosmos-Predict1-14B-Video2World": "Cosmos_Predict1_Video2World_14B",
+    # "Cosmos-Predict1-7B-Text2World_post-trained": "Cosmos_Predict1_Text2World_7B_Post_trained",
+    # "Cosmos-Predict1-14B-Text2World_post-trained": "Cosmos_Predict1_Text2World_14B_Post_trained",
+    # "Cosmos-Predict1-7B-Video2World_post-trained": "Cosmos_Predict1_Video2World_7B_Post_trained",
+    # "Cosmos-Predict1-14B-Video2World_post-trained": "Cosmos_Predict1_Video2World_14B_Post_trained",
+    # "Cosmos-Predict1-7B-Text2World-Sample-AV-Multiview": "Cosmos_Predict1_Text2World_7B_Multiview",
+    # "Cosmos-Predict1-7B-Video2World-Sample-AV-Multiview": "Cosmos_Predict1_Video2World_7B_Multiview",
+    "Cosmos-Predict2-14B-Text2World": "Cosmos_Predict2_14B_Text2World"
 }
 
 
@@ -159,7 +160,7 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
         load_network_model(self.model, f"{self.checkpoint_dir}/{self.checkpoint_name}/model.pt")
 
     def _load_tokenizer(self):
-        load_tokenizer_model(self.model, f"{self.checkpoint_dir}/Cosmos-Tokenize1-CV8x8x8-720p")
+        load_tokenizer_model(self.model, f"{self.checkpoint_dir}/Wan2pt1/Wan2.1_VAE.pth")
 
     def _offload_prompt_upsampler_model(self):
         """Move prompt enhancement model to CPU/disk.

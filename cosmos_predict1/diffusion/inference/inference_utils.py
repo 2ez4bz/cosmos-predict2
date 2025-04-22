@@ -304,7 +304,6 @@ def load_model_by_config(
     config.validate()
     # Freeze the config so developers don't change it during training.
     config.freeze()  # type: ignore
-
     # Initialize model
     with skip_init_linear():
         model = model_class(config.model)
@@ -408,7 +407,7 @@ def get_video_batch(model, prompt_embedding, negative_prompt_embedding, height, 
         negative_prompt_embedding=negative_prompt_embedding,
     )
     state_shape = [
-        model.tokenizer.channel,
+        model.tokenizer.latent_ch,
         model.tokenizer.get_latent_num_frames(num_video_frames),
         height // model.tokenizer.spatial_compression_factor,
         width // model.tokenizer.spatial_compression_factor,
