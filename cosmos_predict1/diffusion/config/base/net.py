@@ -66,7 +66,7 @@ COSMOS_PREDICT2_NETConfig: LazyDict = L(GeneralDIT)(
     max_fps=30,
     rope_h_extrapolation_ratio=2.0,
     rope_w_extrapolation_ratio=2.0,
-    rope_t_extrapolation_ratio=20 / 24
+    rope_t_extrapolation_ratio=20 / 24,
     extra_per_block_abs_pos_emb=False,
     rope_enable_fps_modulation=False,
 )
