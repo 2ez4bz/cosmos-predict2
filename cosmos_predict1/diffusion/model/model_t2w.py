@@ -27,6 +27,39 @@ from cosmos_predict1.utils import log, misc
 from cosmos_predict1.utils.lazy_config import instantiate as lazy_instantiate
 
 
+class RectifiedFlowScheduler(EDMEulerScheduler):
+    def precondition_outputs(self, sample, model_output, sigma):
+        t = sigma / (sigma + 1)
+        c_skip = 1.0 - t
+        c_out = -t
+        """c_skip = sigma_data**2 / (sigma**2 + sigma_data**2)
+
+        if self.config.prediction_type == "epsilon":
+            c_out = sigma * sigma_data / (sigma**2 + sigma_data**2) ** 0.5
+        elif self.config.prediction_type == "v_prediction":
+            c_out = -sigma * sigma_data / (sigma**2 + sigma_data**2) ** 0.5
+        else:
+            raise ValueError(f"Prediction type {self.config.prediction_type} is not supported.")
+        """
+        denoised = c_skip * sample + c_out * model_output
+
+        return denoised
+
+    def precondition_noise(self, sigma):
+        if not isinstance(sigma, torch.Tensor):
+            sigma = torch.tensor([sigma])
+
+        c_noise = sigma / (sigma + 1)
+
+        return c_noise
+
+    def precondition_inputs(self, sample, sigma):
+        t = sigma / (sigma + 1)
+        c_in = 1.0 - t
+        scaled_sample = sample * c_in
+        return scaled_sample
+
+
 class DiffusionT2WModel(torch.nn.Module):
     """Text-to-world diffusion model that generates video frames from text descriptions.
 
@@ -59,7 +92,7 @@ class DiffusionT2WModel(torch.nn.Module):
         self.setup_data_key()
 
         # 2. setup up diffusion processing and scaling~(pre-condition), sampler
-        self.scheduler = EDMEulerScheduler(sigma_max=80, sigma_min=0.0002, sigma_data=self.sigma_data)
+        self.scheduler = RectifiedFlowScheduler(sigma_max=80, sigma_min=0.0002, sigma_data=self.sigma_data)
         self.tokenizer = None
         self.model = None
 
