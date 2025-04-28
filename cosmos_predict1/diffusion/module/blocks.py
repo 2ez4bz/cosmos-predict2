@@ -322,6 +322,7 @@ class FinalLayer(nn.Module):
         )  # O = spatial_patch_size * spatial_patch_size * temporal_patch_size * out_channels
         return x_B_T_H_W_O
 
+
 class Block(nn.Module):
     """
     A transformer block that combines self-attention, cross-attention and MLP layers with AdaLN modulation.
