@@ -53,9 +53,8 @@ class Config(config.Config):
             {"callbacks": None},
             {"net": None},
             {"conditioner": "add_fps_image_size_padding_mask"},
-            {"fsdp": None},
             {"ema": "power"},
-            {"vae": "vae1"},
+            {"tokenizer": "wan2pt1_tokenizer"},
             {"checkpoint": "pbss"},
             {"ckpt_klass": "fsdp"},
             # the list is with order, we need global experiment to be the last one
@@ -92,15 +91,15 @@ def make_config():
 
     # Call this function to register config groups.
     register_configs_text2world()
-    register_configs_video2world()
-    register_configs_video2world_instruction()
-    register_configs_video2world_action()
+    # register_configs_video2world()
+    # register_configs_video2world_instruction()
+    # register_configs_video2world_action()
 
     # experiment config are defined in the experiment folder
     # call import_all_modules_from_package to register them
     import_all_modules_from_package("cosmos_predict1.diffusion.training.config.text2world", reload=True)
-    import_all_modules_from_package("cosmos_predict1.diffusion.training.config.video2world", reload=True)
-    import_all_modules_from_package("cosmos_predict1.diffusion.training.config.video2world_instruction", reload=True)
-    import_all_modules_from_package("cosmos_predict1.diffusion.training.config.video2world_action", reload=True)
+    # import_all_modules_from_package("cosmos_predict1.diffusion.training.config.video2world", reload=True)
+    # import_all_modules_from_package("cosmos_predict1.diffusion.training.config.video2world_instruction", reload=True)
+    # import_all_modules_from_package("cosmos_predict1.diffusion.training.config.video2world_action", reload=True)
 
     return c

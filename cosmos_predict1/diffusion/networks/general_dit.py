@@ -367,7 +367,6 @@ class GeneralDIT(nn.Module):
             reshard_after_forward = i < len(self.blocks) - 1
             fully_shard(block, mesh=mesh, reshard_after_forward=reshard_after_forward)
 
-        # TODO: (qsh 2025-01-13) shall we do it?
         fully_shard(self.final_layer, mesh=mesh, reshard_after_forward=True)
         if self.extra_per_block_abs_pos_emb:
             fully_shard(self.extra_pos_embedder, mesh=mesh, reshard_after_forward=True)

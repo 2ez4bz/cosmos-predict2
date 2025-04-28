@@ -17,6 +17,7 @@ import math
 from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Union
 
 import amp_C
+import collections
 import torch
 from apex.multi_tensor_apply import multi_tensor_applier
 from einops import rearrange
@@ -25,6 +26,7 @@ from torch import Tensor
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
 from torch.distributed import broadcast_object_list, get_process_group_ranks
 from torch.distributed.utils import _verify_param_shape_across_processes
+from dataclasses import dataclass, fields
 
 from cosmos_predict1.diffusion.modules.res_sampler import COMMON_SOLVER_OPTIONS
 from cosmos_predict1.diffusion.training.conditioner import BaseVideoCondition, DataType
@@ -33,6 +35,45 @@ from cosmos_predict1.diffusion.training.models.model_image import CosmosConditio
 from cosmos_predict1.diffusion.training.models.model_image import DiffusionModel as ImageModel
 from cosmos_predict1.diffusion.training.models.model_image import diffusion_fsdp_class_decorator
 from cosmos_predict1.utils import distributed, log, misc
+from cosmos_predict1.utils.model import Model
+from cosmos_predict1.diffusion.training.utils.dtensor_helper import DTensorFastEmaModelUpdater, broadcast_dtensor_model_states
+from torch.distributed import ProcessGroup, all_gather, broadcast_object_list, get_process_group_ranks, get_world_size
+from cosmos_predict1.diffusion.training.networks.model_weights_stats import WeightTrainingStat
+from cosmos_predict1.diffusion.inference.inference_utils import non_strict_load_model
+
+import functools
+from contextlib import contextmanager
+from dataclasses import dataclass, fields
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple, Type, TypeVar
+
+import numpy as np
+import torch
+import torch.nn.functional as F
+from megatron.core import parallel_state
+from torch.distributed.fsdp import FullStateDictConfig
+from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
+from torch.distributed.fsdp import ShardingStrategy, StateDictType
+from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
+from torch.nn.modules.module import _IncompatibleKeys
+
+from cosmos_predict1.diffusion.functional.batch_ops import batch_mul
+from cosmos_predict1.diffusion.module.blocks import FourierFeatures
+from cosmos_predict1.diffusion.module.pretrained_vae import BaseVAE
+from cosmos_predict1.diffusion.modules.denoiser_scaling import RectifiedFlowScaling
+from cosmos_predict1.diffusion.modules.res_sampler import COMMON_SOLVER_OPTIONS, Sampler
+from cosmos_predict1.diffusion.training.functional.loss import create_per_sample_loss_mask
+from cosmos_predict1.diffusion.training.utils.fsdp_helper import apply_fsdp_checkpointing, hsdp_device_mesh
+from cosmos_predict1.diffusion.training.utils.optim_instantiate import get_base_scheduler
+from cosmos_predict1.diffusion.types import DenoisePrediction
+from cosmos_predict1.utils import distributed, log, misc
+from cosmos_predict1.utils.ema import FastEmaModelUpdater
+from cosmos_predict1.utils.lazy_config import LazyDict
+from cosmos_predict1.utils.lazy_config import instantiate as lazy_instantiate
+from cosmos_predict1.utils.model import Model
+from cosmos_predict1.utils.misc import count_params
+from torch.distributed._composable.fsdp import FSDPModule, fully_shard
+from torch.distributed._tensor.api import DTensor
+from cosmos_predict1.diffusion.training.utils.torch_futrure import clip_grad_norm_
 
 l2_norm_impl = amp_C.multi_tensor_l2norm
 multi_tensor_scale_impl = amp_C.multi_tensor_scale
@@ -41,7 +82,6 @@ multi_tensor_scale_impl = amp_C.multi_tensor_scale
 # to avoid apply normalization or augment image dimension multiple times
 # It is due to we do not have normalization and augment image dimension in the dataloader and move it to the model
 IS_PREPROCESSED_KEY = "is_preprocessed"
-
 
 def robust_broadcast(tensor: torch.Tensor, src: int, pg, is_check_shape: bool = False) -> torch.Tensor:
     """
@@ -73,103 +113,505 @@ def robust_broadcast(tensor: torch.Tensor, src: int, pg, is_check_shape: bool = 
     return tensor
 
 
-def _broadcast(item: torch.Tensor | str | None, to_tp: bool = True, to_cp: bool = True) -> torch.Tensor | str | None:
+
+def broadcast_split_tensor(
+    tensor: torch.Tensor,
+    seq_dim: int,
+    process_group: Optional[ProcessGroup] = None,
+) -> torch.Tensor:
+    """
+    Broadcast the tensor from the minimum rank in the specified group(s).
+    """
+    if tensor is None:
+        return tensor
+    min_rank = min(get_process_group_ranks(process_group))
+    tensor = robust_broadcast(tensor, min_rank, process_group)
+    return split_inputs_cp(tensor, seq_dim, process_group)
+
+def broadcast(
+    item: torch.Tensor | str | None, process_group: Optional[ProcessGroup] = None
+) -> torch.Tensor | str | None:
     """
     Broadcast the item from the minimum rank in the specified group(s).
-    Since global rank = tp_rank + cp_rank * tp_size + ...
-    First broadcast in the tp_group and then in the cp_group will
-    ensure that the item is broadcasted across ranks in cp_group and tp_group.
-
-    Parameters:
-    - item: The item to broadcast (can be a torch.Tensor, str, or None).
-    - to_tp: Whether to broadcast to the tensor model parallel group.
-    - to_cp: Whether to broadcast to the context parallel group.
     """
-    if not parallel_state.is_initialized():
+    if process_group is None:
         return item
-    tp_group = parallel_state.get_tensor_model_parallel_group()
-    cp_group = parallel_state.get_context_parallel_group()
 
-    to_tp = to_tp and parallel_state.get_tensor_model_parallel_world_size() > 1
-    to_cp = to_cp and parallel_state.get_context_parallel_world_size() > 1
-
-    if to_tp:
-        min_tp_rank = min(get_process_group_ranks(tp_group))
-
-    if to_cp:
-        min_cp_rank = min(get_process_group_ranks(cp_group))
-
+    min_rank = min(get_process_group_ranks(process_group))
     if isinstance(item, torch.Tensor):  # assume the device is cuda
-        # log.info(f"{item.shape}", rank0_only=False)
-        if to_tp:
-            # torch.distributed.broadcast(item, min_tp_rank, group=tp_group)
-            item = robust_broadcast(item, min_tp_rank, tp_group)
-        if to_cp:
-            # torch.distributed.broadcast(item, min_cp_rank, group=cp_group)
-            item = robust_broadcast(item, min_cp_rank, cp_group)
+        item = robust_broadcast(item, min_rank, process_group)
     elif item is not None:
         broadcastable_list = [item]
-        if to_tp:
-            # log.info(f"{broadcastable_list}", rank0_only=False)
-            broadcast_object_list(broadcastable_list, min_tp_rank, group=tp_group)
-        if to_cp:
-            broadcast_object_list(broadcastable_list, min_cp_rank, group=cp_group)
-
+        broadcast_object_list(broadcastable_list, min_rank, group=process_group)
         item = broadcastable_list[0]
     return item
 
+class DiffusionModel(Model):
+    def __init__(self, config, **kwargs): #TODO: gets fsdp_checkpointer
+        super().__init__()
 
-def broadcast_condition(condition: BaseVideoCondition, to_tp: bool = True, to_cp: bool = True) -> BaseVideoCondition:
-    condition_kwargs = {}
-    for k, v in condition.to_dict().items():
-        if isinstance(v, torch.Tensor):
-            assert not v.requires_grad, f"{k} requires gradient. the current impl does not support it"
-        condition_kwargs[k] = _broadcast(v, to_tp=to_tp, to_cp=to_cp)
-    condition = type(condition)(**condition_kwargs)
-    return condition
+        self.config = config
 
+        # how many sample have been processed
+        self.sample_counter = 0
+        self.precision = {
+            "float32": torch.float32,
+            "float16": torch.float16,
+            "bfloat16": torch.bfloat16,
+        }[config.precision]
+        self.tensor_kwargs = {"device": "cuda", "dtype": self.precision}
+        log.warning(f"DiffusionModel: precision {self.precision}")
+        # Timer passed to network to detect slow ranks.
+        # 1. set data keys and data information
+        self.sigma_data = config.sigma_data
+        # self.state_shape = list(config.latent_shape)
+        self.setup_data_key()
 
-class DiffusionModel(ImageModel):
-    def __init__(self, config):
-        super().__init__(config)
+        # 2. setup up diffusion processing and scaling~(pre-condition), sampler
+        self.sde = lazy_instantiate(config.sde)
+        self.sampler = Sampler()
+        self.scaling = RectifiedFlowScaling(self.sigma_data)
+
+        # 3. vae
+        with misc.timer("DiffusionModel: set_up_tokenizer"):
+            self.tokenizer: BaseVAE = lazy_instantiate(config.tokenizer)
+            assert (
+                self.tokenizer.latent_ch == self.config.state_ch
+            ), f"latent_ch {self.tokenizer.latent_ch} != state_shape {self.config.state_ch}"
+        # 4. Set up loss options, including loss masking, loss reduce and loss scaling
+        self.loss_reduce = getattr(config, "loss_reduce", "mean")
+        assert self.loss_reduce in ["mean", "sum"]
+        self.loss_scale = getattr(config, "loss_scale", 1.0)
+        log.critical(f"Using {self.loss_reduce} loss reduce with loss scale {self.loss_scale}")
+
+        assert self.config.adjust_video_noise is True
+
+        if self.config.adjust_video_noise:
+            self.video_noise_multiplier = math.sqrt(self.config.state_t)
+        else:
+            self.video_noise_multiplier = 1.0
+
+        # 5. create fsdp mesh if needed
+        if config.fsdp_shard_size > 1:
+            self.fsdp_device_mesh = hsdp_device_mesh(
+                sharding_group_size=config.fsdp_shard_size,
+            )
+        else:
+            self.fsdp_device_mesh = None
+
+        # 6. diffusion neural networks part
+        self.set_up_model()
+
+        # 7. training states
+        if parallel_state.is_initialized():
+            self.data_parallel_size = parallel_state.get_data_parallel_world_size()
+        else:
+            self.data_parallel_size = 1
+
         # Initialize trained_data_record with defaultdict, key: image, video, iteration
         self.trained_data_record = {
             "image": 0,
             "video": 0,
             "iteration": 0,
         }
-        if parallel_state.is_initialized():
-            self.data_parallel_size = parallel_state.get_data_parallel_world_size()
-        else:
-            self.data_parallel_size = 1
-
-        if self.config.adjust_video_noise:
-            self.video_noise_multiplier = math.sqrt(self.state_shape[1])
-        else:
-            self.video_noise_multiplier = 1.0
 
     def setup_data_key(self) -> None:
         self.input_data_key = self.config.input_data_key  # by default it is video key for Video diffusion model
         self.input_image_key = self.config.input_image_key
 
-    def is_image_batch(self, data_batch: dict[str, Tensor]) -> bool:
-        """We hanlde two types of data_batch. One comes from a joint_dataloader where "dataset_name" can be used to differenciate image_batch and video_batch.
-        Another comes from a dataloader which we by default assumes as video_data for video model training.
-        """
-        is_image = self.input_image_key in data_batch
-        is_video = self.input_data_key in data_batch
-        assert (
-            is_image != is_video
-        ), "Only one of the input_image_key or input_data_key should be present in the data_batch."
-        return is_image
+    def build_net(self):
+        config = self.config
+        init_device = "meta"
+        with misc.timer("Creating PyTorch model"):
+            with torch.device(init_device):
+                net = lazy_instantiate(config.net)
 
-    def draw_training_sigma_and_epsilon(self, size: int, condition: BaseVideoCondition) -> Tensor:
-        sigma_B, epsilon = super().draw_training_sigma_and_epsilon(size, condition)
+            self._param_count = count_params(net, verbose=False)
+
+            if self.fsdp_device_mesh:
+                net.fully_shard(mesh=self.fsdp_device_mesh)
+                net = fully_shard(net, mesh=self.fsdp_device_mesh, reshard_after_forward=True)
+
+            with misc.timer("meta to cuda and broadcast model states"):
+                net.to_empty(device="cuda")
+                # IMPORTANT: (qsh) model init should not depends on current tensor shape, or it can handle Dtensor shape.
+                net.init_weights()
+
+            if self.fsdp_device_mesh:
+                # TODO: (qsh 2024-12-05) recall model weight init!!! be careful for buffers!
+                broadcast_dtensor_model_states(net, self.fsdp_device_mesh)
+                for name, param in net.named_parameters():
+                    assert isinstance(param, DTensor), f"param should be DTensor, {name} got {type(param)}"
+        return net
+
+    @misc.timer("DiffusionModel: set_up_model")
+    def set_up_model(self):
+        config = self.config
+        with misc.timer("Creating PyTorch model and ema if enabled"):
+            self.conditioner = lazy_instantiate(config.conditioner)
+            assert (
+                sum(p.numel() for p in self.conditioner.parameters() if p.requires_grad) == 0
+            ), "conditioner should not have learnable parameters"
+            self.net = self.build_net()
+            self._param_count = count_params(self.net, verbose=False)
+
+            if config.ema.enabled:
+                self.net_ema = self.build_net()
+                self.net_ema.requires_grad_(False)
+
+                if self.fsdp_device_mesh:
+                    self.net_ema_worker = DTensorFastEmaModelUpdater()
+                else:
+                    self.net_ema_worker = FastEmaModelUpdater()
+
+                s = config.ema.rate
+                self.ema_exp_coefficient = np.roots([1, 7, 16 - s**-2, 12 - s**-2]).real.max()
+
+                self.net_ema_worker.copy_to(src_model=self.net, tgt_model=self.net_ema)
+        torch.cuda.empty_cache()
+
+    def init_optimizer_scheduler(
+        self, optimizer_config: LazyDict, scheduler_config: LazyDict
+    ) -> tuple[torch.optim.Optimizer, torch.optim.lr_scheduler.LRScheduler]:
+        """Creates the optimizer and scheduler for the model.
+
+        Args:
+            config_model (ModelConfig): The config object for the model.
+
+        Returns:
+            optimizer (torch.optim.Optimizer): The model optimizer.
+            scheduler (torch.optim.lr_scheduler.LRScheduler): The optimization scheduler.
+        """
+        optimizer = lazy_instantiate(optimizer_config, model=self.net)
+        scheduler = get_base_scheduler(optimizer, self, scheduler_config)
+        return optimizer, scheduler
+
+    # ------------------------ training hooks ------------------------
+    def on_before_zero_grad(
+        self, optimizer: torch.optim.Optimizer, scheduler: torch.optim.lr_scheduler.LRScheduler, iteration: int
+    ) -> None:
+        """
+        update the net_ema
+        """
+        del scheduler, optimizer
+
+        if self.config.ema.enabled:
+            # calculate beta for EMA update
+            ema_beta = self.ema_beta(iteration)
+            self.net_ema_worker.update_average(self.net, self.net_ema, beta=ema_beta)
+
+    def on_train_start(self, memory_format: torch.memory_format = torch.preserve_format) -> None:
+        if self.config.ema.enabled:
+            self.net_ema.to(dtype=torch.float32)
+        if hasattr(self.tokenizer, "reset_dtype"):
+            self.tokenizer.reset_dtype()
+        self.net = self.net.to(memory_format=memory_format, **self.tensor_kwargs)
+
+        if hasattr(self.config, "use_torch_compile") and self.config.use_torch_compile:  # compatible with old config
+            if torch.__version__ < "2.3":
+                log.warning(
+                    "torch.compile in Pytorch version older than 2.3 doesn't work well with activation checkpointing.\n"
+                    "It's very likely there will be no significant speedup from torch.compile.\n"
+                    "Please use at least 24.04 Pytorch container, or imaginaire4:v7 container."
+                )
+            # Increasing cache size. It's required because of the model size and dynamic input shapes resulting in
+            # multiple different triton kernels. For 28 TransformerBlocks, the cache limit of 256 should be enough for
+            # up to 9 different input shapes, as 28*9 < 256. If you have more Blocks or input shapes, and you observe
+            # graph breaks at each Block (detectable with torch._dynamo.explain) or warnings about
+            # exceeding cache limit, you may want to increase this size.
+            # Starting with 24.05 Pytorch container, the default value is 256 anyway.
+            # You can read more about it in the comments in Pytorch source code under path torch/_dynamo/cache_size.py.
+            torch._dynamo.config.accumulated_cache_size_limit = 256
+            # dynamic=False means that a separate kernel is created for each shape. It incurs higher compilation costs
+            # at initial iterations, but can result in more specialized and efficient kernels.
+            # dynamic=True currently throws errors in pytorch 2.3.
+            self.net = torch.compile(self.net, dynamic=False, disable=not self.config.use_torch_compile)
+
+    # ------------------------ training ------------------------
+    def training_step(
+        self, data_batch: dict[str, torch.Tensor], iteration: int
+    ) -> tuple[dict[str, torch.Tensor], torch.Tensor]:
+        """
+        Performs a single training step for the diffusion model.
+
+        This method is responsible for executing one iteration of the model's training. It involves:
+        1. Adding noise to the input data using the SDE process.
+        2. Passing the noisy data through the network to generate predictions.
+        3. Computing the loss based on the difference between the predictions and the original data, \
+            considering any configured loss weighting.
+
+        Args:
+            data_batch (dict): raw data batch draw from the training data loader.
+            iteration (int): Current iteration number.
+
+        Returns:
+            tuple: A tuple containing two elements:
+                - dict: additional data that used to debug / logging / callbacks
+                - Tensor: The computed loss for the training step as a PyTorch Tensor.
+
+        Raises:
+            AssertionError: If the class is conditional, \
+                but no number of classes is specified in the network configuration.
+
+        Notes:
+            - The method handles different types of conditioning
+            - The method also supports Kendall's loss
+        """
+        self._update_train_stats(data_batch)
+
+        # Get the input data to noise and denoise~(image, video) and the corresponding conditioner.
+        _, x0_B_C_T_H_W, condition = self.get_data_and_condition(data_batch)
+
+        # Sample pertubation noise levels and N(0, 1) noises
+        sigma_B_T, epsilon_B_C_T_H_W = self.draw_training_sigma_and_epsilon(x0_B_C_T_H_W.size(), condition)
+
+        # Broadcast and split the input data and condition for model parallelism
+        x0_B_C_T_H_W, condition, epsilon_B_C_T_H_W, sigma_B_T = self.broadcast_split_for_model_parallelsim(
+            x0_B_C_T_H_W, condition, epsilon_B_C_T_H_W, sigma_B_T, is_train=True
+        )
+        output_batch, kendall_loss, _, _ = self.compute_loss_with_epsilon_and_sigma(
+            x0_B_C_T_H_W, condition, epsilon_B_C_T_H_W, sigma_B_T
+        )
+
+        if self.loss_reduce == "mean":
+            kendall_loss = kendall_loss.mean() * self.loss_scale
+        elif self.loss_reduce == "sum":
+            kendall_loss = kendall_loss.sum(dim=1).mean() * self.loss_scale
+        else:
+            raise ValueError(f"Invalid loss_reduce: {self.loss_reduce}")
+
+        return output_batch, kendall_loss
+
+    @staticmethod
+    def get_context_parallel_group():
+        if parallel_state.is_initialized():
+            return parallel_state.get_context_parallel_group()
+        return None
+
+    def broadcast_split_for_model_parallelsim(
+        self, x0_B_C_T_H_W, condition, epsilon_B_C_T_H_W, sigma_B_T, is_train=True
+    ):
+        """
+        Broadcast and split the input data and condition for model parallelism.
+        Currently, we only support context parallelism.
+        """
+        cp_group = self.get_context_parallel_group()
+        cp_size = 1 if cp_group is None else cp_group.size()
+        if condition.is_video and cp_size > 1:
+            x0_B_C_T_H_W = broadcast_split_tensor(x0_B_C_T_H_W, seq_dim=2, process_group=cp_group)
+            epsilon_B_C_T_H_W = broadcast_split_tensor(epsilon_B_C_T_H_W, seq_dim=2, process_group=cp_group)
+            if sigma_B_T is not None:
+                assert sigma_B_T.ndim == 2, "sigma_B_T should be 2D tensor"
+                if sigma_B_T.shape[-1] == 1:  # single sigma is shared across all frames
+                    sigma_B_T = broadcast(sigma_B_T, cp_group)
+                else:  # different sigma for each frame
+                    sigma_B_T = broadcast_split_tensor(sigma_B_T, seq_dim=1, process_group=cp_group)
+            if condition is not None:
+                condition = condition.broadcast(cp_group)
+            self.net.enable_context_parallel(cp_group)
+        else:
+            self.net.disable_context_parallel()
+
+        return x0_B_C_T_H_W, condition, epsilon_B_C_T_H_W, sigma_B_T
+
+    def _update_train_stats(self, data_batch: dict[str, torch.Tensor]) -> None:
+        is_image = self.is_image_batch(data_batch)
+        input_key = self.input_image_key if is_image else self.input_data_key
+        if isinstance(self.net, WeightTrainingStat):
+            if is_image:
+                self.net.accum_image_sample_counter += data_batch[input_key].shape[0] * self.data_parallel_size
+            else:
+                self.net.accum_video_sample_counter += data_batch[input_key].shape[0] * self.data_parallel_size
+
+    def draw_training_sigma_and_epsilon(self, x0_size: int, condition: Any) -> torch.Tensor:
+        batch_size = x0_size[0]
+        epsilon = torch.randn(x0_size, device="cuda")
+        sigma_B = self.sde.sample_t(batch_size).to(device="cuda")
+        sigma_B_1 = rearrange(sigma_B, "b -> b 1")  # add a dimension for T, all frames share the same sigma
         is_video_batch = condition.data_type == DataType.VIDEO
         multiplier = self.video_noise_multiplier if is_video_batch else 1
-        sigma_B = _broadcast(sigma_B * multiplier, to_tp=True, to_cp=is_video_batch)
-        epsilon = _broadcast(epsilon, to_tp=True, to_cp=is_video_batch)
-        return sigma_B, epsilon
+        sigma_B_1 = sigma_B_1 * multiplier
+        return sigma_B_1, epsilon
+
+    def get_per_sigma_loss_weights(self, sigma: torch.Tensor):
+        """
+        Args:
+            sigma (tensor): noise level
+
+        Returns:
+            loss weights per sigma noise level
+        """
+        return (sigma**2 + self.sigma_data**2) / (sigma * self.sigma_data) ** 2
+
+    # ------------------------ Sampling ------------------------
+    def generate_samples(self, batch_size: int, condition: CosmosCondition) -> torch.Tensor:
+        """
+        Generate samples with given condition. It is WITHOUT classifier-free-guidance.
+
+        Args:
+            batch_size (int):
+            condition (CosmosCondition): condition information generated from self.conditioner
+        """
+        _H, _W = self.get_video_latent_height_width()
+        state_shape = [
+            self.config.state_ch,
+            self.config.state_t,
+            _H // self.tokenizer.spatial_compression_factor,
+            _W // self.tokenizer.spatial_compression_factor,
+        ]
+        x_sigma_max = torch.randn(batch_size, *state_shape, **self.tensor_kwargs) * self.sde.sigma_max
+
+        def x0_fn(x, t):
+            return self.denoise(x, t, condition).x0  # ODE function
+
+        return self.sampler(x0_fn, x_sigma_max, sigma_max=self.sde.sigma_max)
+
+    def generate_cfg_samples(
+        self, batch_size: int, condition: CosmosCondition, uncondition: CosmosCondition, guidance=1.5
+    ) -> torch.Tensor:
+        """
+        Generate samples with with classifier-free-guidance.
+
+        Args:
+            batch_size (int):
+            condition (CosmosCondition): condition information generated from self.conditioner
+            uncondition (CosmosCondition): uncondition information, possibily generated from self.conditioner
+        """
+        _H, _W = self.get_video_latent_height_width()
+        state_shape = [
+            self.config.state_ch,
+            self.config.state_t,
+            _H // self.tokenizer.spatial_compression_factor,
+            _W // self.tokenizer.spatial_compression_factor,
+        ]
+
+        x_sigma_max = torch.randn(batch_size, *state_shape, **self.tensor_kwargs) * self.sde.sigma_max
+
+        def x0_fn(x, t):
+            cond_x0 = self.denoise(x, t, condition).x0
+            uncond_x0 = self.denoise(x, t, uncondition).x0
+            return cond_x0 + guidance * (cond_x0 - uncond_x0)
+
+        return self.sampler(x0_fn, x_sigma_max, sigma_max=self.sde.sigma_max)
+
+    def get_x0_fn_from_batch(
+        self,
+        data_batch: Dict,
+        guidance: float = 1.5,
+        is_negative_prompt: bool = False,
+    ) -> Callable:
+        """
+        Generates a callable function `x0_fn` based on the provided data batch and guidance factor.
+
+        This function first processes the input data batch through a conditioning workflow (`conditioner`) to obtain conditioned and unconditioned states. It then defines a nested function `x0_fn` which applies a denoising operation on an input `noise_x` at a given noise level `sigma` using both the conditioned and unconditioned states.
+
+        Args:
+        - data_batch (Dict): A batch of data used for conditioning. The format and content of this dictionary should align with the expectations of the `self.conditioner`
+        - guidance (float, optional): A scalar value that modulates the influence of the conditioned state relative to the unconditioned state in the output. Defaults to 1.5.
+        - is_negative_prompt (bool): use negative prompt t5 in uncondition if true
+
+        Returns:
+        - Callable: A function `x0_fn(noise_x, sigma)` that takes two arguments, `noise_x` and `sigma`, and return x0 predictoin
+
+        The returned function is suitable for use in scenarios where a denoised state is required based on both conditioned and unconditioned inputs, with an adjustable level of guidance influence.
+        """
+        if is_negative_prompt:
+            condition, uncondition = self.conditioner.get_condition_with_negative_prompt(data_batch)
+        else:
+            condition, uncondition = self.conditioner.get_condition_uncondition(data_batch)
+
+        is_image_batch = self.is_image_batch(data_batch)
+        condition = condition.edit_data_type(DataType.IMAGE if is_image_batch else DataType.VIDEO)
+        uncondition = uncondition.edit_data_type(DataType.IMAGE if is_image_batch else DataType.VIDEO)
+        _, x0, _ = self.get_data_and_condition(data_batch)
+        _, condition, _, _ = self.broadcast_split_for_model_parallelsim(x0, condition, None, None, is_train=False)
+        _, uncondition, _, _ = self.broadcast_split_for_model_parallelsim(x0, uncondition, None, None, is_train=False)
+
+        # For inference, check if parallel_state is initialized
+        if parallel_state.is_initialized():
+            pass
+        else:
+            assert (
+                not self.net.is_context_parallel_enabled
+            ), "parallel_state is not initialized, context parallel should be turned off."
+
+        def x0_fn(noise_x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
+            cond_x0 = self.denoise(noise_x, sigma, condition).x0
+            uncond_x0 = self.denoise(noise_x, sigma, uncondition).x0
+            raw_x0 = cond_x0 + guidance * (cond_x0 - uncond_x0)
+            if "guided_image" in data_batch:
+                # replacement trick that enables inpainting with base model
+                assert "guided_mask" in data_batch, "guided_mask should be in data_batch if guided_image is present"
+                guide_image = data_batch["guided_image"]
+                guide_mask = data_batch["guided_mask"]
+                raw_x0 = guide_mask * guide_image + (1 - guide_mask) * raw_x0
+            return raw_x0
+
+        return x0_fn
+
+    def generate_samples_from_batch(
+        self,
+        data_batch: Dict,
+        guidance: float = 1.5,
+        seed: int = 1,
+        state_shape: Tuple | None = None,
+        n_sample: int | None = None,
+        is_negative_prompt: bool = False,
+        num_steps: int = 35,
+        solver_option: COMMON_SOLVER_OPTIONS = "2ab",
+        x_sigma_max: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        """
+        Generate samples from the batch. Based on given batch, it will automatically determine whether to generate image or video samples.
+        Args:
+            data_batch (dict): raw data batch draw from the training data loader.
+            iteration (int): Current iteration number.
+            guidance (float): guidance weights
+            seed (int): random seed
+            state_shape (tuple): shape of the state, default to data batch if not provided
+            n_sample (int): number of samples to generate
+            is_negative_prompt (bool): use negative prompt t5 in uncondition if true
+            num_steps (int): number of steps for the diffusion process
+            solver_option (str): differential equation solver option, default to "2ab"~(mulitstep solver)
+        """
+        self._normalize_video_databatch_inplace(data_batch)
+        self._augment_image_dim_inplace(data_batch)
+        is_image_batch = self.is_image_batch(data_batch)
+        input_key = self.input_image_key if is_image_batch else self.input_data_key
+        if n_sample is None:
+            n_sample = data_batch[input_key].shape[0]
+        if state_shape is None:
+            _T, _H, _W = data_batch[input_key].shape[-3:]
+            state_shape = [
+                self.config.state_ch,
+                self.tokenizer.get_latent_num_frames(_T),
+                _H // self.tokenizer.spatial_compression_factor,
+                _W // self.tokenizer.spatial_compression_factor,
+            ]
+
+        x0_fn = self.get_x0_fn_from_batch(data_batch, guidance, is_negative_prompt=is_negative_prompt)
+
+        if x_sigma_max is None:
+            x_sigma_max = (
+                misc.arch_invariant_rand(
+                    (n_sample,) + tuple(state_shape),
+                    torch.float32,
+                    self.tensor_kwargs["device"],
+                    seed,
+                )
+                * self.sde.sigma_max
+            )
+
+        if self.net.is_context_parallel_enabled:
+            x_sigma_max = split_inputs_cp(x=x_sigma_max, seq_dim=2, cp_group=self.get_context_parallel_group())
+
+        samples = self.sampler(
+            x0_fn, x_sigma_max, num_steps=num_steps, sigma_max=self.sde.sigma_max, solver_option=solver_option
+        )
+        if self.net.is_context_parallel_enabled:
+            samples = cat_outputs_cp(samples, seq_dim=2, cp_group=self.get_context_parallel_group())
+
+        return samples
 
     @torch.no_grad()
     def validation_step(
@@ -193,32 +635,35 @@ class DiffusionModel(ImageModel):
         caption = data["ai_caption"]
         return {"gt": gt, "result": sample, "caption": caption}, torch.tensor([0]).to(**self.tensor_kwargs)
 
-    def training_step(self, data_batch: Dict[str, Tensor], iteration: int) -> Tuple[Dict[str, Tensor] | Tensor]:
-        input_key = self.input_data_key  # by default it is video key
-        if self.is_image_batch(data_batch):
-            input_key = self.input_image_key
-        batch_size = data_batch[input_key].shape[0]
-        self.trained_data_record["image" if self.is_image_batch(data_batch) else "video"] += (
-            batch_size * self.data_parallel_size
-        )
-        self.trained_data_record["iteration"] += 1
-        return super().training_step(data_batch, iteration)
+    @torch.no_grad()
+    def forward(self, xt, t, condition: CosmosCondition):
+        """
+        Performs denoising on the input noise data, noise level, and condition
 
-    def state_dict(self) -> Dict[str, Any]:
-        state_dict = super().state_dict()
-        state_dict["trained_data_record"] = self.trained_data_record
-        return state_dict
+        Args:
+            xt (torch.Tensor): The input noise data.
+            sigma (torch.Tensor): The noise level.
+            condition (CosmosCondition): conditional information, generated from self.conditioner
 
-    def load_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False):
-        if "trained_data_record" in state_dict and hasattr(self, "trained_data_record"):
-            trained_data_record = state_dict.pop("trained_data_record")
-            if trained_data_record:
-                assert set(trained_data_record.keys()) == set(self.trained_data_record.keys())
-                for k, v in trained_data_record.items():
-                    self.trained_data_record[k] = v
-        else:
-            log.warning("trained_data_record not found in the state_dict.")
-        return super().load_state_dict(state_dict, strict, assign)
+        Returns:
+            DenoisePrediction: The denoised prediction, it includes clean data predicton (x0), \
+                noise prediction (eps_pred) and optional confidence (logvar).
+        """
+        return self.denoise(xt, t, condition)
+
+    def get_data_and_condition(self, data_batch: dict[str, torch.Tensor]) -> Tuple[Tensor, CosmosCondition]:
+        self._normalize_video_databatch_inplace(data_batch)
+        self._augment_image_dim_inplace(data_batch)
+        is_image_batch = self.is_image_batch(data_batch)
+
+        # Latent state
+        raw_state = data_batch[self.input_image_key if is_image_batch else self.input_data_key]
+        latent_state = self.encode(raw_state).contiguous().float()
+
+        # Condition
+        condition = self.conditioner(data_batch)
+        condition = condition.edit_data_type(DataType.IMAGE if is_image_batch else DataType.VIDEO)
+        return raw_state, latent_state, condition
 
     def _normalize_video_databatch_inplace(self, data_batch: dict[str, Tensor], input_key: str = None) -> None:
         """
@@ -257,406 +702,272 @@ class DiffusionModel(ImageModel):
                 data_batch[IS_PREPROCESSED_KEY] = True
 
     def _augment_image_dim_inplace(self, data_batch: dict[str, Tensor], input_key: str = None) -> None:
-        input_key = self.input_image_key if input_key is None else input_key
-        if input_key in data_batch:
-            # Check if the data has already been augmented and avoid re-augmenting
-            if IS_PREPROCESSED_KEY in data_batch and data_batch[IS_PREPROCESSED_KEY] is True:
-                assert (
-                    data_batch[input_key].shape[2] == 1
-                ), f"Image data is claimed be augmented while its shape is {data_batch[input_key].shape}"
-                return
-            else:
-                data_batch[input_key] = rearrange(data_batch[input_key], "b c h w -> b c 1 h w").contiguous()
-                data_batch[IS_PREPROCESSED_KEY] = True
+            input_key = self.input_image_key if input_key is None else input_key
+            if input_key in data_batch:
+                # Check if the data has already been augmented and avoid re-augmenting
+                if IS_PREPROCESSED_KEY in data_batch and data_batch[IS_PREPROCESSED_KEY] is True:
+                    assert (
+                        data_batch[input_key].shape[2] == 1
+                    ), f"Image data is claimed be augmented while its shape is {data_batch[input_key].shape}"
+                    return
+                else:
+                    data_batch[input_key] = rearrange(data_batch[input_key], "b c h w -> b c 1 h w").contiguous()
+                    data_batch[IS_PREPROCESSED_KEY] = True
 
-    def get_data_and_condition(self, data_batch: dict[str, Tensor]) -> Tuple[Tensor, BaseVideoCondition]:
-        self._normalize_video_databatch_inplace(data_batch)
-        self._augment_image_dim_inplace(data_batch)
-        input_key = self.input_data_key  # by default it is video key
-        is_image_batch = self.is_image_batch(data_batch)
-        is_video_batch = not is_image_batch
+    # ------------------ Checkpointing ------------------
+    def state_dict(self) -> Dict[str, Any]:
+        net_state_dict = self.net.state_dict(prefix="net.")
+        if self.config.ema.enabled:
+            ema_state_dict = self.net_ema.state_dict(prefix="net_ema.")
+            net_state_dict.update(ema_state_dict)
+        net_state_dict["trained_data_record"] = self.trained_data_record
+        return net_state_dict
 
-        # Broadcast data and condition across TP and CP groups.
-        # sort keys to make sure the order is same, IMPORTANT! otherwise, nccl will hang!
-        local_keys = sorted(list(data_batch.keys()))
-        # log.critical(f"all keys {local_keys}", rank0_only=False)
-        for key in local_keys:
-            data_batch[key] = _broadcast(data_batch[key], to_tp=True, to_cp=is_video_batch)
+    def load_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False):
+        """
+        Loads a state dictionary into the model and optionally its EMA counterpart.
+        Different from torch strict=False mode, the method will not raise error for unmatched state shape while raise warning.
 
-        if is_image_batch:
-            input_key = self.input_image_key
+        Parameters:e
+            state_dict (Mapping[str, Any]): A dictionary containing separate state dictionaries for the model and
+                                            potentially for an EMA version of the model under the keys 'model' and 'ema', respectively.
+            strict (bool, optional): If True, the method will enforce that the keys in the state dict match exactly
+                                    those in the model and EMA model (if applicable). Defaults to True.
+            assign (bool, optional): If True and in strict mode, will assign the state dictionary directly rather than
+                                    matching keys one-by-one. This is typically used when loading parts of state dicts
+                                    or using customized loading procedures. Defaults to False.
+        """
+        _reg_state_dict = collections.OrderedDict()
+        _ema_state_dict = collections.OrderedDict()
+        for k, v in state_dict.items():
+            if k.startswith("net."):
+                _reg_state_dict[k.replace("net.", "")] = v
+            elif k.startswith("net_ema."):
+                _ema_state_dict[k.replace("net_ema.", "")] = v
 
-        # Latent state
-        raw_state = data_batch[input_key]
-        latent_state = self.encode(raw_state).contiguous()
+        state_dict = _reg_state_dict
 
-        # Condition
-        condition = self.conditioner(data_batch)
-        if is_image_batch:
-            condition.data_type = DataType.IMAGE
+        if strict:
+            reg_results: _IncompatibleKeys = self.net.load_state_dict(_reg_state_dict, strict=strict, assign=assign)
+
+            if self.config.ema.enabled:
+                ema_results: _IncompatibleKeys = self.net_ema.load_state_dict(
+                    _ema_state_dict, strict=strict, assign=assign
+                )
+
+            return _IncompatibleKeys(
+                missing_keys=reg_results.missing_keys + (ema_results.missing_keys if self.config.ema.enabled else []),
+                unexpected_keys=reg_results.unexpected_keys
+                + (ema_results.unexpected_keys if self.config.ema.enabled else []),
+            )
         else:
-            condition.data_type = DataType.VIDEO
+            log.critical("load model in non-strict mode")
+            log.critical(non_strict_load_model(self.net, _reg_state_dict), rank0_only=False)
+            if self.config.ema.enabled:
+                log.critical("load ema model in non-strict mode")
+                log.critical(non_strict_load_model(self.net_ema, _ema_state_dict), rank0_only=False)
 
-        # VAE has randomness. CP/TP group should have the same encoded output.
+    # ------------------ public methods ------------------
+    def ema_beta(self, iteration: int) -> float:
+        """
+        Calculate the beta value for EMA update.
+        weights = weights * beta + (1 - beta) * new_weights
 
-        latent_state = _broadcast(latent_state, to_tp=True, to_cp=is_video_batch)
-        condition = broadcast_condition(condition, to_tp=True, to_cp=is_video_batch)
+        Args:
+            iteration (int): Current iteration number.
 
-        return raw_state, latent_state, condition
+        Returns:
+            float: The calculated beta value.
+        """
+        iteration = iteration + self.config.ema.iteration_shift
+        if iteration < 1:
+            return 0.0
+        return (1 - 1 / (iteration + 1)) ** (self.ema_exp_coefficient + 1)
 
     def on_train_start(self, memory_format: torch.memory_format = torch.preserve_format) -> None:
-        super().on_train_start(memory_format)
-        if parallel_state.is_initialized() and parallel_state.get_tensor_model_parallel_world_size() > 1:
-            sequence_parallel = getattr(parallel_state, "sequence_parallel", False)
-            if sequence_parallel:
-                self.net.enable_sequence_parallel()
+        if self.config.ema.enabled:
+            self.net_ema.to(dtype=torch.float32)
+        if hasattr(self.tokenizer, "reset_dtype"):
+            self.tokenizer.reset_dtype()
+        self.net = self.net.to(memory_format=memory_format, **self.tensor_kwargs)
+
+        if hasattr(self.config, "use_torch_compile") and self.config.use_torch_compile:  # compatible with old config
+            if torch.__version__ < "2.3":
+                log.warning(
+                    "torch.compile in Pytorch version older than 2.3 doesn't work well with activation checkpointing.\n"
+                    "It's very likely there will be no significant speedup from torch.compile.\n"
+                    "Please use at least 24.04 Pytorch container, or imaginaire4:v7 container."
+                )
+            # Increasing cache size. It's required because of the model size and dynamic input shapes resulting in
+            # multiple different triton kernels. For 28 TransformerBlocks, the cache limit of 256 should be enough for
+            # up to 9 different input shapes, as 28*9 < 256. If you have more Blocks or input shapes, and you observe
+            # graph breaks at each Block (detectable with torch._dynamo.explain) or warnings about
+            # exceeding cache limit, you may want to increase this size.
+            # Starting with 24.05 Pytorch container, the default value is 256 anyway.
+            # You can read more about it in the comments in Pytorch source code under path torch/_dynamo/cache_size.py.
+            torch._dynamo.config.accumulated_cache_size_limit = 256
+            # dynamic=False means that a separate kernel is created for each shape. It incurs higher compilation costs
+            # at initial iterations, but can result in more specialized and efficient kernels.
+            # dynamic=True currently throws errors in pytorch 2.3.
+            self.net = torch.compile(self.net, dynamic=False, disable=not self.config.use_torch_compile)
+
+    def is_image_batch(self, data_batch: dict[str, Tensor]) -> bool:
+        """We hanlde two types of data_batch. One comes from a joint_dataloader where "dataset_name" can be used to differenciate image_batch and video_batch.
+        Another comes from a dataloader which we by default assumes as video_data for video model training.
+        """
+        is_image = self.input_image_key in data_batch
+        is_video = self.input_data_key in data_batch
+        assert (
+            is_image != is_video
+        ), "Only one of the input_image_key or input_data_key should be present in the data_batch."
+        return is_image
+
+    def denoise(self, xt_B_C_T_H_W: torch.Tensor, sigma: torch.Tensor, condition: CosmosCondition) -> DenoisePrediction:
+        """
+        Performs denoising on the input noise data, noise level, and condition
+
+        Args:
+            xt (torch.Tensor): The input noise data.
+            sigma (torch.Tensor): The noise level.
+            condition (CosmosCondition): conditional information, generated from self.conditioner
+
+        Returns:
+            DenoisePrediction: The denoised prediction, it includes clean data predicton (x0), \
+                noise prediction (eps_pred).
+        """
+        if sigma.ndim == 1:
+            sigma_B_T = rearrange(sigma, "b -> b 1")
+        elif sigma.ndim == 2:
+            sigma_B_T = sigma
+        else:
+            raise ValueError(f"sigma shape {sigma.shape} is not supported")
+        sigma_B_1_T_1_1 = rearrange(sigma_B_T, "b t -> b 1 t 1 1")
+        # get precondition for the network
+        c_skip_B_1_T_1_1, c_out_B_1_T_1_1, c_in_B_1_T_1_1, c_noise_B_1_T_1_1 = self.scaling(sigma=sigma_B_1_T_1_1)
+
+        # forward pass through the network
+        net_output_B_C_T_H_W = self.net(
+            x_B_C_T_H_W=(xt_B_C_T_H_W * c_in_B_1_T_1_1).to(
+                **self.tensor_kwargs
+            ),  # Eq. 7 of https://arxiv.org/pdf/2206.00364.pdf
+            timesteps_B_T=c_noise_B_1_T_1_1.squeeze(dim=[1, 3, 4]).to(
+                **self.tensor_kwargs
+            ),  # Eq. 7 of https://arxiv.org/pdf/2206.00364.pdf
+            **condition.to_dict(),
+        ).float()
+
+        x0_pred_B_C_T_H_W = c_skip_B_1_T_1_1 * xt_B_C_T_H_W + c_out_B_1_T_1_1 * net_output_B_C_T_H_W
+
+        # get noise prediction based on sde
+        eps_pred_B_C_T_H_W = (xt_B_C_T_H_W - x0_pred_B_C_T_H_W) / sigma_B_1_T_1_1
+
+        return DenoisePrediction(x0_pred_B_C_T_H_W, eps_pred_B_C_T_H_W, None)
 
     def compute_loss_with_epsilon_and_sigma(
         self,
-        data_batch: dict[str, torch.Tensor],
-        x0_from_data_batch: torch.Tensor,
-        x0: torch.Tensor,
+        x0_B_C_T_H_W: torch.Tensor,
         condition: CosmosCondition,
-        epsilon: torch.Tensor,
-        sigma: torch.Tensor,
+        epsilon_B_C_T_H_W: torch.Tensor,
+        sigma_B_T: torch.Tensor,
     ):
-        if self.is_image_batch(data_batch):
-            # Turn off CP
-            self.net.disable_context_parallel()
-        else:
-            if parallel_state.is_initialized():
-                if parallel_state.get_context_parallel_world_size() > 1:
-                    # Turn on CP
-                    cp_group = parallel_state.get_context_parallel_group()
-                    self.net.enable_context_parallel(cp_group)
-                    log.debug("[CP] Split x0 and epsilon")
-                    x0 = split_inputs_cp(x=x0, seq_dim=2, cp_group=self.net.cp_group)
-                    epsilon = split_inputs_cp(x=epsilon, seq_dim=2, cp_group=self.net.cp_group)
-
-        output_batch, kendall_loss, pred_mse, edm_loss = super().compute_loss_with_epsilon_and_sigma(
-            data_batch, x0_from_data_batch, x0, condition, epsilon, sigma
-        )
-        if not self.is_image_batch(data_batch):
-            if self.loss_reduce == "sum" and parallel_state.get_context_parallel_world_size() > 1:
-                kendall_loss *= parallel_state.get_context_parallel_world_size()
-
-        return output_batch, kendall_loss, pred_mse, edm_loss
-
-    def get_x0_fn_from_batch(
-        self,
-        data_batch: Dict,
-        guidance: float = 1.5,
-        is_negative_prompt: bool = False,
-    ) -> Callable:
         """
-        Generates a callable function `x0_fn` based on the provided data batch and guidance factor.
+        Compute loss givee epsilon and sigma
 
-        This function first processes the input data batch through a conditioning workflow (`conditioner`) to obtain conditioned and unconditioned states. It then defines a nested function `x0_fn` which applies a denoising operation on an input `noise_x` at a given noise level `sigma` using both the conditioned and unconditioned states.
+        This method is responsible for computing loss give epsilon and sigma. It involves:
+        1. Adding noise to the input data using the SDE process.
+        2. Passing the noisy data through the network to generate predictions.
+        3. Computing the loss based on the difference between the predictions and the original data, \
+            considering any configured loss weighting.
 
-        Args:
-        - data_batch (Dict): A batch of data used for conditioning. The format and content of this dictionary should align with the expectations of the `self.conditioner`
-        - guidance (float, optional): A scalar value that modulates the influence of the conditioned state relative to the unconditioned state in the output. Defaults to 1.5.
-        - is_negative_prompt (bool): use negative prompt t5 in uncondition if true
-
-        Returns:
-        - Callable: A function `x0_fn(noise_x, sigma)` that takes two arguments, `noise_x` and `sigma`, and return x0 predictoin
-
-        The returned function is suitable for use in scenarios where a denoised state is required based on both conditioned and unconditioned inputs, with an adjustable level of guidance influence.
-        """
-        if is_negative_prompt:
-            condition, uncondition = self.conditioner.get_condition_with_negative_prompt(data_batch)
-        else:
-            condition, uncondition = self.conditioner.get_condition_uncondition(data_batch)
-
-        to_cp = self.net.is_context_parallel_enabled
-        # For inference, check if parallel_state is initialized
-        if parallel_state.is_initialized():
-            condition = broadcast_condition(condition, to_tp=True, to_cp=to_cp)
-            uncondition = broadcast_condition(uncondition, to_tp=True, to_cp=to_cp)
-        else:
-            assert not to_cp, "parallel_state is not initialized, context parallel should be turned off."
-
-        def x0_fn(noise_x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
-            cond_x0 = self.denoise(noise_x, sigma, condition).x0
-            uncond_x0 = self.denoise(noise_x, sigma, uncondition).x0
-            raw_x0 = cond_x0 + guidance * (cond_x0 - uncond_x0)
-            if "guided_image" in data_batch:
-                # replacement trick that enables inpainting with base model
-                assert "guided_mask" in data_batch, "guided_mask should be in data_batch if guided_image is present"
-                guide_image = data_batch["guided_image"]
-                guide_mask = data_batch["guided_mask"]
-                raw_x0 = guide_mask * guide_image + (1 - guide_mask) * raw_x0
-            return raw_x0
-
-        return x0_fn
-
-    def get_x_from_clean(
-        self,
-        in_clean_img: torch.Tensor,
-        sigma_max: float | None,
-        seed: int = 1,
-    ) -> Tensor:
-        """
-        in_clean_img (torch.Tensor): input clean image for image-to-image/video-to-video by adding noise then denoising
-        sigma_max (float): maximum sigma applied to in_clean_image for image-to-image/video-to-video
-        """
-        if in_clean_img is None:
-            return None
-        generator = torch.Generator(device=self.tensor_kwargs["device"])
-        generator.manual_seed(seed)
-        noise = torch.randn(*in_clean_img.shape, **self.tensor_kwargs, generator=generator)
-        if sigma_max is None:
-            sigma_max = self.sde.sigma_max
-        x_sigma_max = in_clean_img + noise * sigma_max
-        return x_sigma_max
-
-    def generate_samples_from_batch(
-        self,
-        data_batch: Dict,
-        guidance: float = 1.5,
-        seed: int = 1,
-        state_shape: Tuple | None = None,
-        n_sample: int | None = None,
-        is_negative_prompt: bool = False,
-        num_steps: int = 35,
-        solver_option: COMMON_SOLVER_OPTIONS = "2ab",
-        x_sigma_max: Optional[torch.Tensor] = None,
-        sigma_max: float | None = None,
-        return_noise: bool = False,
-    ) -> Tensor | Tuple[Tensor, Tensor]:
-        """
-        Generate samples from the batch. Based on given batch, it will automatically determine whether to generate image or video samples.
         Args:
             data_batch (dict): raw data batch draw from the training data loader.
-            iteration (int): Current iteration number.
-            guidance (float): guidance weights
-            seed (int): random seed
-            state_shape (tuple): shape of the state, default to self.state_shape if not provided
-            n_sample (int): number of samples to generate
-            is_negative_prompt (bool): use negative prompt t5 in uncondition if true
-            num_steps (int): number of steps for the diffusion process
-            solver_option (str): differential equation solver option, default to "2ab"~(mulitstep solver)
-            return_noise (bool): return the initial noise or not, used for ODE pairs generation
+            x0: image/video latent
+            condition: text condition
+            epsilon: noise
+            sigma: noise level
+
+        Returns:
+            tuple: A tuple containing four elements:
+                - dict: additional data that used to debug / logging / callbacks
+                - Tensor 1: kendall loss,
+                - Tensor 2: MSE loss,
+                - Tensor 3: EDM loss
+
+        Raises:
+            AssertionError: If the class is conditional, \
+                but no number of classes is specified in the network configuration.
+
+        Notes:
+            - The method handles different types of conditioning
+            - The method also supports Kendall's loss
         """
-        self._normalize_video_databatch_inplace(data_batch)
-        self._augment_image_dim_inplace(data_batch)
-        is_image_batch = self.is_image_batch(data_batch)
-        if n_sample is None:
-            input_key = self.input_image_key if is_image_batch else self.input_data_key
-            n_sample = data_batch[input_key].shape[0]
-        if state_shape is None:
-            if is_image_batch:
-                state_shape = (self.state_shape[0], 1, *self.state_shape[2:])  # C,T,H,W
+        # Get the mean and stand deviation of the marginal probability distribution.
+        mean_B_C_T_H_W, std_B_T = self.sde.marginal_prob(x0_B_C_T_H_W, sigma_B_T)
+        # Generate noisy observations
+        xt_B_C_T_H_W = mean_B_C_T_H_W + epsilon_B_C_T_H_W * rearrange(std_B_T, "b t -> b 1 t 1 1")
+        # make prediction
+        model_pred = self.denoise(xt_B_C_T_H_W, sigma_B_T, condition)
+        # loss weights for different noise levels
+        weights_per_sigma_B_T = self.get_per_sigma_loss_weights(sigma=sigma_B_T)
+        # extra loss mask for each sample, for example, human faces, hands
+        pred_mse_B_C_T_H_W = (x0_B_C_T_H_W - model_pred.x0) ** 2
+        edm_loss_B_C_T_H_W = pred_mse_B_C_T_H_W * rearrange(weights_per_sigma_B_T, "b t -> b 1 t 1 1")
+        # TODO: (yenchenl 2025-01-23) Remove `kendall_loss` later
+        kendall_loss = edm_loss_B_C_T_H_W
+        output_batch = {
+            "x0": x0_B_C_T_H_W,
+            "xt": xt_B_C_T_H_W,
+            "sigma": sigma_B_T,
+            "weights_per_sigma": weights_per_sigma_B_T,
+            "condition": condition,
+            "model_pred": model_pred,
+            "mse_loss": pred_mse_B_C_T_H_W.mean(),
+            "edm_loss": edm_loss_B_C_T_H_W.mean(),
+            "edm_loss_per_frame": torch.mean(edm_loss_B_C_T_H_W, dim=[1, 3, 4]),
+        }
+        return output_batch, kendall_loss, pred_mse_B_C_T_H_W, edm_loss_B_C_T_H_W
 
-        x0_fn = self.get_x0_fn_from_batch(data_batch, guidance, is_negative_prompt=is_negative_prompt)
+    @torch.no_grad()
+    def encode(self, state: torch.Tensor) -> torch.Tensor:
+        return self.tokenizer.encode(state) * self.sigma_data
+    
+    @torch.no_grad()
+    def decode(self, latent: torch.Tensor) -> torch.Tensor:
+        return self.tokenizer.decode(latent / self.sigma_data)
 
-        x_sigma_max = (
-            misc.arch_invariant_rand(
-                (n_sample,) + tuple(state_shape),
-                torch.float32,
-                self.tensor_kwargs["device"],
-                seed,
-            )
-            * self.sde.sigma_max
-        )
+    @contextmanager
+    def ema_scope(self, context=None, is_cpu=False):
+        if self.config.ema.enabled:
+            # https://github.com/pytorch/pytorch/issues/144289
+            for module in self.net.modules():
+                if isinstance(module, FSDPModule):
+                    module.reshard()
+            self.net_ema_worker.cache(self.net.parameters(), is_cpu=is_cpu)
+            self.net_ema_worker.copy_to(src_model=self.net_ema, tgt_model=self.net)
+            if context is not None:
+                log.info(f"{context}: Switched to EMA weights")
+        try:
+            yield None
+        finally:
+            if self.config.ema.enabled:
+                for module in self.net.modules():
+                    if isinstance(module, FSDPModule):
+                        module.reshard()
+                self.net_ema_worker.restore(self.net.parameters())
+                if context is not None:
+                    log.info(f"{context}: Restored training weights")
 
-        if self.net.is_context_parallel_enabled:
-            x_sigma_max = split_inputs_cp(x=x_sigma_max, seq_dim=2, cp_group=self.net.cp_group)
-
-        samples = self.sampler(
-            x0_fn, x_sigma_max, num_steps=num_steps, sigma_max=self.sde.sigma_max, solver_option=solver_option
-        )
-        if self.net.is_context_parallel_enabled:
-            samples = cat_outputs_cp(samples, seq_dim=2, cp_group=self.net.cp_group)
-
-        if return_noise:
-            if self.net.is_context_parallel_enabled:
-                x_sigma_max = cat_outputs_cp(x_sigma_max, seq_dim=2, cp_group=self.net.cp_group)
-            return samples, x_sigma_max / self.sde.sigma_max
-
-        return samples
-
-    def on_after_backward(self, iteration: int = 0):
-        finalize_model_grads([self])
-
-    def get_grad_norm(
+    def clip_grad_norm_(
         self,
-        norm_type: Union[int, float] = 2,
-        filter_fn: Callable[[str, torch.nn.Parameter], bool] | None = None,
-    ) -> float:
-        """Calculate the norm of gradients, handling model parallel parameters.
-
-        This function is adapted from torch.nn.utils.clip_grad.clip_grad_norm_
-        with added functionality to handle model parallel parameters.
-
-        Args:
-            norm_type (float or int): Type of norm to use. Can be 2 for L2 norm.
-                'inf' for infinity norm is not supported.
-            filter_fn (callable, optional): Function to filter parameters for norm calculation.
-                Takes parameter name and parameter as input, returns True if this parameter is sharded else False.
-
-        Returns:
-            float: Total norm of the parameters (viewed as a single vector).
-
-        Note:
-            - Uses NVIDIA's multi-tensor applier for efficient norm calculation.
-            - Handles both model parallel and non-model parallel parameters separately.
-            - Currently only supports L2 norm (norm_type = 2).
-        """
-        # Get model parallel group if parallel state is initialized
-        if parallel_state.is_initialized():
-            model_parallel_group = parallel_state.get_model_parallel_group()
-        else:
-            model_parallel_group = None
-
-        # Default filter function to identify tensor parallel parameters
-        if filter_fn is None:
-
-            def is_tp(name, param):
-                return (
-                    any(key in name for key in ["to_q.0", "to_k.0", "to_v.0", "to_out.0", "layer1", "layer2"])
-                    and "_extra_state" not in name
-                )
-
-            filter_fn = is_tp
-
-        # Separate gradients into model parallel and non-model parallel
-        without_mp_grads_for_norm = []
-        with_mp_grads_for_norm = []
-        for name, param in self.named_parameters():
-            if param.grad is not None:
-                if filter_fn(name, param):
-                    with_mp_grads_for_norm.append(param.grad.detach())
-                else:
-                    without_mp_grads_for_norm.append(param.grad.detach())
-
-        # Only L2 norm is currently supported
-        if norm_type != 2.0:
-            raise NotImplementedError(f"Norm type {norm_type} is not supported. Only L2 norm (2.0) is implemented.")
-
-        # Calculate L2 norm using NVIDIA's multi-tensor applier
-        dummy_overflow_buf = torch.tensor([0], dtype=torch.int, device="cuda")
-
-        # Calculate norm for non-model parallel gradients
-        without_mp_grad_norm = torch.tensor([0], dtype=torch.float, device="cuda")
-        if without_mp_grads_for_norm:
-            without_mp_grad_norm, _ = multi_tensor_applier(
-                l2_norm_impl,
-                dummy_overflow_buf,
-                [without_mp_grads_for_norm],
-                False,  # no per-parameter norm
-            )
-
-        # Calculate norm for model parallel gradients
-        with_mp_grad_norm = torch.tensor([0], dtype=torch.float, device="cuda")
-        if with_mp_grads_for_norm:
-            with_mp_grad_norm, _ = multi_tensor_applier(
-                l2_norm_impl,
-                dummy_overflow_buf,
-                [with_mp_grads_for_norm],
-                False,  # no per-parameter norm
-            )
-
-        # Square the norms as we'll be summing across model parallel GPUs
-        total_without_mp_norm = without_mp_grad_norm**2
-        total_with_mp_norm = with_mp_grad_norm**2
-
-        # Sum across all model-parallel GPUs
-        torch.distributed.all_reduce(total_with_mp_norm, op=torch.distributed.ReduceOp.SUM, group=model_parallel_group)
-
-        # Combine norms from model parallel and non-model parallel gradients
-        total_norm = (total_with_mp_norm.item() + total_without_mp_norm.item()) ** 0.5
-
-        return total_norm
-
-    def clip_grad_norm_(self, max_norm: float):
-        """
-        This function performs gradient clipping to prevent exploding gradients.
-        It calculates the total norm of the gradients, and if it exceeds the
-        specified max_norm, scales the gradients down proportionally.
-
-        Args:
-            max_norm (float): The maximum allowed norm for the gradients.
-
-        Returns:
-            torch.Tensor: The total norm of the gradients before clipping.
-
-        Note:
-            This implementation uses NVIDIA's multi-tensor applier for efficiency.
-        """
-        # Collect gradients from all parameters that require gradients
-        grads = []
-        for param in self.parameters():
-            if param.grad is not None:
-                grads.append(param.grad.detach())
-
-        # Calculate the total norm of the gradients
-        total_norm = self.get_grad_norm()
-
-        # Compute the clipping coefficient
-        clip_coeff = max_norm / (total_norm + 1.0e-6)
-
-        # Apply gradient clipping if the total norm exceeds max_norm
-        if clip_coeff < 1.0:
-            dummy_overflow_buf = torch.tensor([0], dtype=torch.int, device="cuda")
-            # Apply the scaling to the gradients using multi_tensor_applier for efficiency
-            multi_tensor_applier(multi_tensor_scale_impl, dummy_overflow_buf, [grads, grads], clip_coeff)
-
-        return torch.tensor([total_norm])
-
-
-def _allreduce_layernorm_grads(model: List[torch.nn.Module]):
-    """
-    All-reduce the following layernorm grads:
-    - When tensor parallel is enabled, all-reduce grads of QK-layernorm
-    - When sequence parallel, all-reduce grads of AdaLN, t_embedder, additional_timestamp_embedder,
-    and affline_norm.
-    """
-    sequence_parallel = getattr(parallel_state, "sequence_parallel", False)
-
-    if parallel_state.get_tensor_model_parallel_world_size() > 1:
-        grads = []
-        for model_chunk in model:
-            for name, param in model_chunk.named_parameters():
-                if not param.requires_grad:
-                    continue
-
-                if "to_q.1" in name or "to_k.1" in name:  # TP  # Q-layernorm  # K-layernorm
-                    # grad = param.main_grad
-                    grad = param.grad
-                    if grad is not None:
-                        grads.append(grad.data)
-
-                if sequence_parallel:  # TP + SP
-                    if (
-                        "t_embedder" in name
-                        or "adaLN_modulation" in name
-                        or "additional_timestamp_embedder" in name
-                        or "affline_norm" in name
-                        or "input_hint_block" in name
-                        or "zero_blocks" in name
-                    ):
-                        # grad = param.main_grad
-                        grad = param.grad
-                        if grad is not None:
-                            grads.append(grad.data)
-
-        if grads:
-            coalesced = _flatten_dense_tensors(grads)
-            torch.distributed.all_reduce(coalesced, group=parallel_state.get_tensor_model_parallel_group())
-            for buf, synced in zip(grads, _unflatten_dense_tensors(coalesced, grads)):
-                buf.copy_(synced)
-
-
-def finalize_model_grads(model: List[torch.nn.Module]):
-    """
-    All-reduce layernorm grads for tensor/sequence parallelism.
-    Reference implementation: https://github.com/NVIDIA/Megatron-LM/blob/main/megatron/core/distributed/finalize_model_grads.py#L99
-    """
-
-    _allreduce_layernorm_grads(model)
-
-
-@diffusion_fsdp_class_decorator
-class FSDPDiffusionModel(DiffusionModel):
-    pass
+        max_norm: float,
+        norm_type: float = 2.0,
+        error_if_nonfinite: bool = False,
+        foreach: Optional[bool] = None,
+    ):
+        return clip_grad_norm_(
+            self.net.parameters(),
+            max_norm,
+            norm_type=norm_type,
+            error_if_nonfinite=error_if_nonfinite,
+            foreach=foreach,
+        )

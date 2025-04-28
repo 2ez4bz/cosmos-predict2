@@ -24,52 +24,49 @@ from cosmos_predict1.utils.lazy_config import LazyDict
 
 
 @attrs.define(slots=False)
-class FSDPConfig:
-    policy: str = "block"
-    checkpoint: bool = False
-    min_num_params: int = 1024
-    sharding_group_size: int = 8
-    sharding_strategy: str = "full"
+class EMAConfig:
+    """
+    Config for the EMA.
+    """
 
+    enabled: bool = True
+    rate: float = 0.1
+    iteration_shift: int = 0
 
 @attrs.define(slots=False)
 class DefaultModelConfig:
-    vae: LazyDict = None
+    """
+    Config for [DiffusionModel][projects.cosmos.diffusion.v2.models.t2v_model.DiffusionModel].
+    """
+
+    tokenizer: LazyDict = None
     conditioner: LazyDict = None
     net: LazyDict = None
-    ema: LazyDict = PowerEMAConfig
+    ema: EMAConfig = EMAConfig()
     sde: LazyDict = L(EDMSDE)(
         p_mean=0.0,
         p_std=1.0,
         sigma_max=80,
         sigma_min=0.0002,
     )
-    sigma_data: float = 0.5
-    camera_sample_weight: LazyDict = LazyDict(
-        dict(
-            enabled=False,
-            weight=5.0,
-        )
-    )
-    aesthetic_finetuning: LazyDict = LazyDict(
-        dict(
-            enabled=False,
-        )
-    )
-    loss_mask_enabled: bool = False
-    loss_masking: LazyDict = None
-    loss_add_logvar: bool = True
+    fsdp_shard_size: int = 1
+    sigma_data: float = 1.0
     precision: str = "bfloat16"
     input_data_key: str = "video"  # key to fetch input data from data_batch
-    input_image_key: str = "images_1024"  # key to fetch input image from data_batch
-    loss_reduce: str = "sum"
-    loss_scale: float = 1.0
-    latent_shape: List[int] = [16, 24, 44, 80]  # 24 corresponig to 136 frames
-    fsdp_enabled: bool = False
+    input_image_key: str = "images"  # key to fetch input image from data_batch
+    loss_reduce: str = "mean"
+    loss_scale: float = 10.0
     use_torch_compile: bool = False
-    fsdp: FSDPConfig = attrs.field(factory=FSDPConfig)
-    use_dummy_temporal_dim: bool = False  # Whether to use dummy temporal dimension in data
-    adjust_video_noise: bool = False  # whether or not adjust video noise accroding to the video length
+    adjust_video_noise: bool = True  # whether or not adjust video noise accroding to the video length
+
+    state_ch: int = 16  # for latent model, ref to the latent channel number
+    state_t: int = 8  # for latent model, ref to the latent number of frames
+    resolution: str = "512"
+    scaling: str = "edm"
+    resize_online: bool = False  # whether or not resize the video online; usecase: we load a long duration video and resize to fewer frames, simulate low fps video. If true, it use tokenizer and state_t to infer the expected length of the resized video.
+
+    def __post_init__(self):
+        assert self.scaling in ["edm", "rectified_flow"]
 
 
 @attrs.define(slots=False)

@@ -30,13 +30,14 @@ from cosmos_predict1.diffusion.config.base.conditioner import (
 )
 from cosmos_predict1.diffusion.training.conditioner import VideoConditioner
 from cosmos_predict1.diffusion.training.config.base.optim import FusedAdamWConfig, LambdaLinearSchedulerConfig
-from cosmos_predict1.diffusion.training.config.base.vae import get_cosmos_tokenizer_comp8x8x8
+from cosmos_predict1.diffusion.training.config.base.vae import get_cosmos_tokenizer_comp8x8x8, get_wan2pt1_tokenizer
 from cosmos_predict1.diffusion.training.config.text2world.experiment import register_experiments
 from cosmos_predict1.diffusion.training.networks.general_dit import GeneralDIT
 from cosmos_predict1.utils.ema import PowerEMATracker
 from cosmos_predict1.utils.lazy_config import PLACEHOLDER
 from cosmos_predict1.utils.lazy_config import LazyCall as L
 from cosmos_predict1.utils.lazy_config import LazyDict
+from cosmos_predict1.diffusion.training.config.base.model import EMAConfig 
 
 FSDP_CHECKPOINTER: Dict[str, str] = L(FSDPCheckpointer)()
 VideoExtendConditionerConfig: LazyDict = L(VideoExtendConditioner)(
@@ -57,6 +58,12 @@ VideoConditionerFpsSizePaddingConfig: LazyDict = L(VideoConditioner)(
     padding_mask=PaddingMaskConfig(),
 )
 
+VideoConditionerTextFpsPaddingConfig: LazyDict = L(VideoConditioner)(
+    text=TextConfig(),
+    fps=FPSConfig(),
+    padding_mask=PaddingMaskConfig(),
+)
+
 
 def register_conditioner(cs):
     cs.store(
@@ -71,6 +78,13 @@ def register_conditioner(cs):
         package="model.conditioner",
         name="add_fps_image_size_padding_mask",
         node=VideoConditionerFpsSizePaddingConfig,
+    )
+
+    cs.store(
+        group="conditioner",
+        package="model.conditioner",
+        name="add_text_fps_padding_mask",
+        node=VideoConditionerTextFpsPaddingConfig,
     )
 
 
@@ -115,6 +129,35 @@ FADITV2Config: LazyDict = L(GeneralDIT)(
     legacy_patch_emb=False,
 )
 
+COSMOS_PREDICT2_NETConfig: LazyDict = L(GeneralDIT)(
+    max_img_h=240,
+    max_img_w=240,
+    max_frames=128,
+    in_channels=16,
+    out_channels=16,
+    patch_spatial=2,
+    patch_temporal=1,
+    model_channels=5120,
+    block_config="FA-CA-MLP",
+    num_blocks=36,
+    num_heads=40,
+    concat_padding_mask=True,
+    pos_emb_cls="rope3d",
+    pos_emb_learnable=True, # It does nothing, debugging
+    pos_emb_interpolation="crop",
+    block_x_format="THWBD",
+    affline_emb_norm=False,
+    use_adaln_lora=True,
+    adaln_lora_dim=256,
+    min_fps=1,
+    max_fps=30,
+    rope_h_extrapolation_ratio=2.0,
+    rope_w_extrapolation_ratio=2.0,
+    rope_t_extrapolation_ratio=20 / 24,
+    extra_per_block_abs_pos_emb=False,
+    rope_enable_fps_modulation=False,
+)
+
 FADITV2_14B_Config = copy.deepcopy(FADITV2Config)
 FADITV2_14B_Config.model_channels = 5120
 FADITV2_14B_Config.num_heads = 40
@@ -124,16 +167,24 @@ FADITV2_14B_Config.num_blocks = 36
 def register_net(cs):
     cs.store(group="net", package="model.net", name="faditv2_7b", node=FADITV2Config)
     cs.store(group="net", package="model.net", name="faditv2_14b", node=FADITV2_14B_Config)
+    cs.store(group="net", package="model.net", name="COSMOS_PREDICT2_NETConfig", node=COSMOS_PREDICT2_NETConfig)
+    
 
 
 def register_vae(cs):
     cs.store(
-        group="vae",
-        package="model.vae",
+        group="tokenizer",
+        package="model.tokenizer",
         name="cosmos_diffusion_tokenizer_comp8x8x8",
         node=get_cosmos_tokenizer_comp8x8x8(resolution="720", chunk_duration=121),
     )
 
+    cs.store(
+        group="tokenizer",
+        package="model.tokenizer",
+        name="wan2pt1_tokenizer",
+        node=get_wan2pt1_tokenizer(),
+    )
 
 PowerEMAConfig: LazyDict = L(PowerEMATracker.initialize_multi_rank_ema)(
     model=PLACEHOLDER, enabled=True, rate=0.10, num=3
@@ -141,7 +192,8 @@ PowerEMAConfig: LazyDict = L(PowerEMATracker.initialize_multi_rank_ema)(
 
 
 def register_ema(cs):
-    cs.store(group="ema", package="model.ema", name="power", node=PowerEMAConfig)
+    # cs.store(group="ema", package="model.ema", name="power", node=PowerEMAConfig)
+    cs.store(group="ema", package="model.ema", name="power", node=EMAConfig) #TDOO: change name
 
 
 def register_optimizer(cs):

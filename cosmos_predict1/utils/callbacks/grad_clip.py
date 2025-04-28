@@ -13,13 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from typing import List, Optional
+from dataclasses import dataclass
+from typing import List, Tuple
 
 import torch
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 
 from cosmos_predict1.utils import distributed
 from cosmos_predict1.utils.callback import Callback
+from cosmos_predict1.utils.model import Model
 
 
 @torch.jit.script
@@ -27,15 +28,44 @@ def _fused_nan_to_num(params: List[torch.Tensor]):
     for param in params:
         torch.nan_to_num(param, nan=0.0, posinf=0.0, neginf=0.0, out=param)
 
+@dataclass
+class _MagnitudeRecord:
+    state: float = 0
+    iter_count: int = 0
+
+    def reset(self) -> None:
+        self.state = 0
+        self.iter_count = 0
+
+    def update(self, cur_state: torch.Tensor) -> None:
+        self.state += cur_state
+        self.iter_count += 1
+
+    def get_stat(self) -> Tuple[float, float]:
+        if self.iter_count > 0:
+            avg_state = self.state / self.iter_count
+            avg_state = avg_state.item()
+        else:
+            avg_state = 0
+        self.reset()
+        return avg_state
 
 class GradClip(Callback):
-    def __init__(
-        self, clip_norm=1.0, force_finite: bool = True, model_key: Optional[str] = None, fsdp_enabled: bool = False
-    ):
+    def __init__(self, clip_norm=1.0, force_finite: bool = True):
         self.clip_norm = clip_norm
         self.force_finite = force_finite
-        self.model_key = model_key
-        self.fsdp_enabled = fsdp_enabled
+
+        self.img_mag_log = _MagnitudeRecord()
+        self.video_mag_log = _MagnitudeRecord()
+        self._cur_state = None
+
+    def on_training_step_start(
+        self, model: Model, data_batch: dict[str, torch.Tensor], iteration: int = 0
+    ) -> None:
+        if model.is_image_batch(data_batch):
+            self._cur_state = self.img_mag_log
+        else:
+            self._cur_state = self.video_mag_log
 
     def on_before_optimizer_step(
         self,
@@ -50,24 +80,16 @@ class GradClip(Callback):
             model = model_ddp.module
         else:
             model = model_ddp
-
-        # select sub-network if specified
-        if self.model_key is not None:
-            items = self.model_key.split(".")
-            for item in items:
-                model = getattr(model, item)
-
+        params = []
         if self.force_finite:
-            params = []
             for param in model.parameters():
                 if param.grad is not None:
                     params.append(param.grad)
                     # torch.nan_to_num(param.grad, nan=0, posinf=0, neginf=0, out=param.grad)
             _fused_nan_to_num(params)
 
-        # check if FSDP is used
-        # total_norm
-        if isinstance(model, FSDP) and self.fsdp_enabled:
-            model.clip_grad_norm_(self.clip_norm)
-        else:
-            torch.nn.utils.clip_grad_norm_(model.parameters(), self.clip_norm, foreach=True)
+        total_norm = model.clip_grad_norm_(self.clip_norm)
+
+        self._cur_state.update(total_norm)
+        if iteration % self.config.trainer.logging_iter == 0:
+            avg_img_mag, avg_video_mag = self.img_mag_log.get_stat(), self.video_mag_log.get_stat()

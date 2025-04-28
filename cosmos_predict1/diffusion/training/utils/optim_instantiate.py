@@ -18,7 +18,7 @@ import torch
 from torch import nn
 
 from cosmos_predict1.utils import log
-from cosmos_predict1.utils.fused_adam import FusedAdam
+from cosmos_predict1.utils.fused_adam_dtensor import FusedAdam
 
 
 def get_regular_param_group(net: nn.Module):

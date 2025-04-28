@@ -28,10 +28,15 @@ from cosmos_predict1.diffusion.functional.batch_ops import batch_mul
 from cosmos_predict1.diffusion.training.conditioner import DataType, VideoExtendCondition
 from cosmos_predict1.diffusion.training.context_parallel import cat_outputs_cp, split_inputs_cp
 from cosmos_predict1.diffusion.training.models.model import DiffusionModel as BaseModel
-from cosmos_predict1.diffusion.training.models.model import _broadcast, broadcast_condition
+# from cosmos_predict1.diffusion.training.models.model import _broadcast, broadcast_condition
 from cosmos_predict1.diffusion.training.models.model_image import diffusion_fsdp_class_decorator
 from cosmos_predict1.utils import log, misc
 
+def _broadcast():
+    raise NotImplementedError()
+
+def broadcast_condition():
+    raise NotImplementedError()
 
 @dataclass
 class VideoDenoisePrediction:

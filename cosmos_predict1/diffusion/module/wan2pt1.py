@@ -700,7 +700,6 @@ class Wan2pt1VAEInterface(VideoTokenizerInterface):
         pass
 
     def encode(self, state: torch.Tensor) -> torch.Tensor:
-        print(f'{state.dtype=}')
         latents = self.model.encode(state)
         num_frames = latents.shape[2]
         if num_frames == 1:

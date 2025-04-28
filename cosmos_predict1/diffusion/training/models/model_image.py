@@ -47,12 +47,14 @@ from cosmos_predict1.utils.model import Model
 @dataclass
 class CosmosCondition:
     crossattn_emb: torch.Tensor
-    crossattn_mask: torch.Tensor
     padding_mask: Optional[torch.Tensor] = None
     scalar_feature: Optional[torch.Tensor] = None
 
     def to_dict(self) -> Dict[str, Optional[torch.Tensor]]:
         return {f.name: getattr(self, f.name) for f in fields(self)}
+
+    def __init__(self):
+        assert False
 
 
 class DiffusionModel(Model):
@@ -73,7 +75,7 @@ class DiffusionModel(Model):
         # Timer passed to network to detect slow ranks.
         # 1. set data keys and data information
         self.sigma_data = config.sigma_data
-        self.state_shape = list(config.latent_shape)
+        # self.state_shape = list(config.latent_shape)
         self.setup_data_key()
 
         # 2. setup up diffusion processing and scaling~(pre-condition), sampler

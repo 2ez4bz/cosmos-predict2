@@ -118,6 +118,19 @@ class BaseVideoCondition:
     def to_dict(self) -> Dict[str, Optional[torch.Tensor]]:
         return {f.name: getattr(self, f.name) for f in fields(self)}
 
+    def edit_data_type(self, data_type: DataType) -> 'BaseVideoCondition':
+        """Edit the data type of the condition.
+
+        Args:
+            data_type: The new data type.
+
+        Returns:
+            A new T2VCondition instance with the new data type.
+        """
+        kwargs = self.to_dict(skip_underscore=False)
+        kwargs["data_type"] = data_type
+        return type(self)(**kwargs)
+
 
 @dataclass
 class VideoExtendCondition(BaseVideoCondition):
@@ -282,7 +295,6 @@ class GeneralConditioner(nn.Module, ABC):
         if "neg_t5_text_embeddings" in data_batch_neg_prompt:
             if isinstance(data_batch_neg_prompt["neg_t5_text_embeddings"], torch.Tensor):
                 data_batch_neg_prompt["t5_text_embeddings"] = data_batch_neg_prompt["neg_t5_text_embeddings"]
-                data_batch_neg_prompt["t5_text_mask"] = data_batch_neg_prompt["neg_t5_text_mask"]
 
         condition: Any = self(data_batch, override_dropout_rate=cond_dropout_rates)
         un_condition: Any = self(data_batch_neg_prompt, override_dropout_rate=uncond_dropout_rates)
@@ -293,13 +305,14 @@ class GeneralConditioner(nn.Module, ABC):
 @dataclass
 class CosmosCondition:
     crossattn_emb: torch.Tensor
-    crossattn_mask: torch.Tensor
     padding_mask: Optional[torch.Tensor] = None
     scalar_feature: Optional[torch.Tensor] = None
 
     def to_dict(self) -> Dict[str, Optional[torch.Tensor]]:
         return {f.name: getattr(self, f.name) for f in fields(self)}
 
+    def __init__(self):
+            assert False
 
 class VideoConditioner(GeneralConditioner):
     def forward(

@@ -28,3 +28,18 @@ class EDMScaling:
         c_in = 1 / (sigma**2 + self.sigma_data**2) ** 0.5
         c_noise = 0.25 * sigma.log()
         return c_skip, c_out, c_in, c_noise
+
+class RectifiedFlowScaling:
+    def __init__(self, sigma_data: float = 1.0):
+        assert abs(sigma_data - 1.0) < 1e-6, "sigma_data must be 1.0 for RectifiedFlowScaling"
+
+    def __call__(self, sigma: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        t = sigma / (sigma + 1)
+        c_skip = 1.0 - t
+        c_out = -t
+        c_in = 1.0 - t
+        c_noise = t
+        return c_skip, c_out, c_in, c_noise
+
+    def sigma_loss_weights(self, sigma: torch.Tensor) -> torch.Tensor:
+        return 1.0 / sigma**2

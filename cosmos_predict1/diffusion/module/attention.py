@@ -60,27 +60,6 @@ class GPT2FeedForward(nn.Module):
 
 
 # ---------------------- Normalization Layer -----------------------
-
-
-def normalize(x: torch.Tensor, dim: Optional[List[int]] = None, eps: float = 0) -> torch.Tensor:
-    """
-    Normalizes the input tensor along specified dimensions such that the average square norm of elements is adjusted.
-
-    Args:
-        x (torch.Tensor): The input tensor to normalize.
-        dim (list, optional): The dimensions over which to normalize. If None, normalizes over all dimensions except the first.
-        eps (float, optional): A small constant to ensure numerical stability during division.
-
-    Returns:
-        torch.Tensor: The normalized tensor.
-    """
-    if dim is None:
-        dim = list(range(1, x.ndim))
-    norm = torch.linalg.vector_norm(x, dim=dim, keepdim=True, dtype=torch.float32)
-    norm = torch.add(eps, norm, alpha=np.sqrt(norm.numel() / x.numel()))
-    return x / norm.to(x.dtype)
-
-
 def get_normalization(name: str, channels: int):
     if name == "I":
         return nn.Identity()

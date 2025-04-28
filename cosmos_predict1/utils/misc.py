@@ -555,3 +555,20 @@ def sync_s3_dir_to_local(
         distributed.barrier()
     local_dir = os.path.join(cache_dir, source_prefix)
     return local_dir
+
+def get_local_tensor_if_DTensor(tensor: torch.Tensor | DTensor) -> torch.tensor:
+    if isinstance(tensor, DTensor):
+        local = tensor.to_local()
+        # As per PyTorch documentation, if the communication is not finished yet, we need to wait for it to finish
+        # https://pytorch.org/docs/stable/distributed.tensor.html#torch.distributed.tensor.DTensor.to_local
+        if isinstance(local, AsyncCollectiveTensor):
+            return local.wait()
+        else:
+            return local
+    return tensor
+
+def count_params(model: nn.Module, verbose=False) -> int:
+    total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    if verbose:
+        print(f"{model.__class__.__name__} has {total_params * 1.e-6:.2f} M params.")
+    return total_params

@@ -19,11 +19,13 @@ from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
+from torch.distributed import ProcessGroup, all_gather, broadcast_object_list, get_process_group_ranks, get_world_size
 
 from cosmos_predict1.diffusion.conditioner import GeneralConditioner
 from cosmos_predict1.diffusion.functional.batch_ops import batch_mul
 from cosmos_predict1.diffusion.training.context_parallel import split_inputs_cp
 from cosmos_predict1.utils.misc import count_params
+from cosmos_predict1.diffusion.training.utils.context_parallel import broadcast
 
 
 class DataType(Enum):
@@ -139,10 +141,24 @@ class FrameRepeatAttr(AbstractEmbModel):
         return "Frame repeat, Output key: [frame_repeat]"
 
 
+
+def broadcast_condition(condition: 'BaseVideoCondition', process_group: Optional[ProcessGroup] = None) -> 'BaseVideoCondition':
+    """
+    Broadcast the condition from the minimum rank in the specified group(s).
+    """
+    if condition.is_broadcasted:
+        return condition
+
+    kwargs = condition.to_dict(skip_underscore=False)
+    for key, value in kwargs.items():
+        if value is not None:
+            kwargs[key] = broadcast(value, process_group)
+    kwargs["_is_broadcasted"] = True
+    return type(condition)(**kwargs)
+
 @dataclass
 class BaseVideoCondition:
     crossattn_emb: torch.Tensor
-    crossattn_mask: torch.Tensor
     data_type: DataType = DataType.VIDEO
     padding_mask: Optional[torch.Tensor] = None
     fps: Optional[torch.Tensor] = None
@@ -152,8 +168,50 @@ class BaseVideoCondition:
     trajectory: Optional[torch.Tensor] = None
     frame_repeat: Optional[torch.Tensor] = None
 
-    def to_dict(self) -> Dict[str, Optional[torch.Tensor]]:
-        return {f.name: getattr(self, f.name) for f in fields(self)}
+    _is_broadcasted: bool = False
+
+    @property
+    def is_broadcasted(self) -> bool:
+        return self._is_broadcasted
+    
+    def to_dict(self, skip_underscore: bool = True) -> Dict[str, Any]:
+        """Converts the condition to a dictionary.
+
+        Returns:
+            Dictionary containing the condition's fields and values.
+        """
+        # return {f.name: getattr(self, f.name) for f in fields(self) if not f.name.startswith("_")}
+        return {f.name: getattr(self, f.name) for f in fields(self) if not (f.name.startswith("_") and skip_underscore)}
+
+
+    def edit_data_type(self, data_type: DataType) -> 'BaseVideoCondition':
+        """Edit the data type of the condition.
+
+        Args:
+            data_type: The new data type.
+
+        Returns:
+            A new BaseVideoCondition instance with the new data type.
+        """
+        kwargs = self.to_dict(skip_underscore=False)
+        kwargs["data_type"] = data_type
+        return type(self)(**kwargs)
+
+    @property
+    def is_video(self) -> bool:
+        return self.data_type == DataType.VIDEO
+
+    def broadcast(self, process_group: torch.distributed.ProcessGroup) -> 'BaseVideoCondition':
+        """Broadcasts and splits the condition across the checkpoint parallelism group.
+        For most condition, such asT2VCondition, we do not need split.
+
+        Args:
+            process_group: The process group for broadcast and split
+
+        Returns:
+            A new BaseCondition instance with the broadcasted and split condition.
+        """
+        return broadcast_condition(self, process_group)
 
 
 @dataclass

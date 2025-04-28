@@ -21,7 +21,6 @@ from einops import rearrange, repeat
 from torch import nn
 from torch.distributed import ProcessGroup, get_process_group_ranks
 
-from cosmos_predict1.diffusion.module.attention import normalize
 from cosmos_predict1.diffusion.module.parallel import split_inputs_cp
 from cosmos_predict1.diffusion.module.timm import trunc_normal_
 
@@ -260,7 +259,9 @@ class LearnablePosEmbAxis(VideoPositionEmb):
         else:
             raise ValueError(f"Unknown interpolation method {self.interpolation}")
 
-        return normalize(emb, dim=-1, eps=1e-6)
+        norm = torch.linalg.vector_norm(emb, dim=-1, keepdim=True, dtype=torch.float32)
+        norm = torch.add(1e-6, norm, alpha=np.sqrt(norm.numel() / emb.numel()))
+        return emb / norm.to(emb.dtype)
 
 
 class MultiviewVideoPositionEmb(nn.Module):

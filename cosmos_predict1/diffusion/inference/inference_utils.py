@@ -367,7 +367,6 @@ def prepare_data_batch(
         "t5_text_mask": torch.ones(1, 512, dtype=torch.bfloat16).cuda(),
         "image_size": torch.tensor([[height, width, height, width]] * 1, dtype=torch.bfloat16).cuda(),
         "fps": torch.tensor([fps] * 1, dtype=torch.bfloat16).cuda(),
-        "num_frames": torch.tensor([num_frames] * 1, dtype=torch.bfloat16).cuda(),
         "padding_mask": torch.zeros((1, 1, height, width), dtype=torch.bfloat16).cuda(),
     }
 
