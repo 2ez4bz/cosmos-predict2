@@ -111,7 +111,7 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
             fps: Frames per second of output video
             num_video_frames: Number of frames to generate
             seed: Random seed for sampling
-            load_mean_std: Whether to load mean_std for the Tokenizer.
+            load_mean_std: Whether to load mean_std for the Tokenizer (only for 81 frames).
         """
         assert inference_type in [
             "text2world",
@@ -127,6 +127,8 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
         self.num_video_frames = num_video_frames
         self.seed = seed
         self.load_mean_std = load_mean_std
+        if self.load_mean_std:
+            assert num_video_frames == 81, "'load_mean_std' can only be used when generating 81 frames."
 
         super().__init__(
             inference_type=inference_type,
