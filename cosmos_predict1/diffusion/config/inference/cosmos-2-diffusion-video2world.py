@@ -17,17 +17,17 @@ from hydra.core.config_store import ConfigStore
 
 from cosmos_predict1.utils.lazy_config import LazyDict
 
-Cosmos_Predict2_14B_Text2World: LazyDict = LazyDict(
+Cosmos_Predict2_2B_Video2World: LazyDict = LazyDict(
     dict(
         defaults=[
-            {"override /net": "cosmos_predict2_net_14b"},
+            {"override /net": "cosmos_predict2_net_2b"},
             {"override /conditioner": "add_fps_padding_mask"},
             {"override /tokenizer": "wan2pt1_tokenizer"},
             "_self_",
         ],
         job=dict(
-            group="Text2World",
-            name="Cosmos_Predict2_14B_Text2World",
+            group="Video2World",
+            name="Cosmos_Predict2_2B_Video2World",
         ),
         model=dict(
             latent_shape=[
@@ -44,6 +44,6 @@ Cosmos_Predict2_14B_Text2World: LazyDict = LazyDict(
 cs = ConfigStore.instance()
 
 for _item in [
-    Cosmos_Predict2_14B_Text2World,
+    Cosmos_Predict2_2B_Video2World,
 ]:
     cs.store(group="experiment", package="_global_", name=_item["job"]["name"], node=_item)

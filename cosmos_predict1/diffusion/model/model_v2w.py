@@ -139,8 +139,10 @@ class DiffusionV2WModel(DiffusionT2WModel):
             new_xt_scaled = self.scheduler.scale_model_input(new_xt, timestep=t)
             # Predict the noise residual
             t = t.to(**self.tensor_kwargs)
-            net_output_cond = self.net(x=new_xt_scaled, timesteps=t, **condition.to_dict())
-            net_output_uncond = self.net(x=new_xt_scaled, timesteps=t, **uncondition.to_dict())
+            ones_B = torch.ones(new_xt.size(0), device=new_xt.device, dtype=t.dtype)
+            t = t * ones_B
+            net_output_cond = self.net(x_B_C_T_H_W=new_xt, timesteps_B_T=t, **condition.to_dict())
+            net_output_uncond = self.net(x_B_C_T_H_W=new_xt, timesteps_B_T=t, **uncondition.to_dict())
             net_output = net_output_cond + guidance * (net_output_cond - net_output_uncond)
             # Replace indicated output with latent
             latent_unscaled = self._reverse_precondition_output(latent, xt=new_xt, sigma=sigma)

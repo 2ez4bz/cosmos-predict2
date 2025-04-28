@@ -23,7 +23,7 @@ from cosmos_predict1.diffusion.config.base.conditioner import (
     VideoExtendConditionerConfig,
     VideoExtendConditionerFrameRepeatConfig,
 )
-from cosmos_predict1.diffusion.config.base.net import FADITV2_14B_Config, FADITV2_Multiview_Config, FADITV2Config, COSMOS_PREDICT2_NETConfig
+from cosmos_predict1.diffusion.config.base.net import FADITV2_14B_Config, FADITV2_Multiview_Config, FADITV2Config, COSMOS_PREDICT2_NET_14B_Config, COSMOS_PREDICT2_NET_2B_Config
 from cosmos_predict1.diffusion.config.base.tokenizer import get_cosmos_diffusion_tokenizer_comp8x8x8, get_wan2pt1_tokenizer
 
 
@@ -49,8 +49,14 @@ def register_net(cs):
     cs.store(
         group="net",
         package="model.net",
-        name="cosmos-predict2-net",
-        node=COSMOS_PREDICT2_NETConfig,
+        name="cosmos_predict2_net_14b",
+        node=COSMOS_PREDICT2_NET_14B_Config,
+    )
+    cs.store(
+        group="net",
+        package="model.net",
+        name="cosmos_predict2_net_2b",
+        node=COSMOS_PREDICT2_NET_2B_Config,
     )
 
 
