@@ -54,6 +54,11 @@ def parse_arguments() -> argparse.Namespace:
         default=250,
         help="Skip prompt upsampler for better robustness if the number of words in the prompt is greater than this value",
     )
+    parser.add_argument(
+        "--load_mean_std",
+        action="store_true",
+        help="Load mean_std from a checkpoint for the Tokenizer.",
+    )
 
     return parser.parse_args()
 
@@ -115,6 +120,7 @@ def demo(args):
         fps=args.fps,
         num_video_frames=args.num_video_frames,
         seed=args.seed,
+        load_mean_std=args.load_mean_std,
     )
 
     if args.num_gpus > 1:
