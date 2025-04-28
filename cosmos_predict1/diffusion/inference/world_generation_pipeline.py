@@ -51,7 +51,7 @@ from cosmos_predict1.utils import log
 from cosmos_predict1.utils.base_world_generation_pipeline import BaseWorldGenerationPipeline
 
 MODEL_NAME_DICT = {
-    "Cosmos-Predict1-2B-Video2World": "Cosmos_Predict2_2B_Video2World",
+    "Cosmos-Predict2-2B-Video2World": "Cosmos_Predict2_2B_Video2World",
     "Cosmos-Predict2-14B-Text2World": "Cosmos_Predict2_14B_Text2World"
 }
 
@@ -568,7 +568,12 @@ class DiffusionVideo2WorldGenerationPipeline(DiffusionText2WorldGenerationPipeli
         """
         if self.offload_tokenizer:
             self._load_tokenizer()
-
+        self.model.state_shape = [
+            self.model.tokenizer.latent_ch,
+            self.model.tokenizer.get_latent_num_frames(self.num_video_frames),
+            self.height // self.model.tokenizer.spatial_compression_factor,
+            self.width // self.model.tokenizer.spatial_compression_factor,
+        ]
         condition_latent = self._run_tokenizer_encoding(image_or_video_path)
 
         if self.offload_network:

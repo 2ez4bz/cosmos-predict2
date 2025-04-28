@@ -113,7 +113,7 @@ def add_common_arguments(parser):
     parser.add_argument("--num_steps", type=int, default=35, help="Number of diffusion sampling steps")
     parser.add_argument("--guidance", type=float, default=7, help="Guidance scale value")
     parser.add_argument(
-        "--num_video_frames", type=int, default=121, choices=[121], help="Number of video frames to sample"
+        "--num_video_frames", type=int, default=121, choices=[121, 77, 93, 81], help="Number of video frames to sample"
     )
     parser.add_argument("--height", type=int, default=704, help="Height of video to sample")
     parser.add_argument("--width", type=int, default=1280, help="Width of video to sample")
@@ -299,6 +299,7 @@ def load_model_by_config(
     config = importlib.import_module(config_module).make_config()
 
     config = override(config, ["--", f"experiment={config_job_name}"])
+    print(config.pretty_print(use_color=True))
 
     # Check that the config is valid
     config.validate()
@@ -323,7 +324,8 @@ def load_network_model(model: DiffusionT2WModel, ckpt_path: str):
 
 
 def load_tokenizer_model(model: DiffusionT2WModel, tokenizer_dir: str, load_mean_std: bool = False, mean_std_path: str = ""):
-    assert load_mean_std and mean_std_path, "'mean_std_path' cannot be empty when loading mean_std."
+    if load_mean_std:
+        assert mean_std_path, "'mean_std_path' cannot be empty when loading mean_std."
     with skip_init_linear():
         model.set_up_tokenizer(tokenizer_dir, load_mean_std=load_mean_std, mean_std_path=mean_std_path)
     model.cuda()
@@ -527,7 +529,6 @@ def generate_world_from_video(
     Returns:
         np.array: Generated video frames in shape [T,H,W,C], range [0,255]
     """
-    assert not model.config.conditioner.video_cond_bool.sample_tokens_start_from_p_or_i, "not supported"
     augment_sigma = DEFAULT_AUGMENT_SIGMA
 
     if condition_latent.shape[2] < state_shape[1]:
@@ -540,7 +541,7 @@ def generate_world_from_video(
             ],
             dim=2,
         ).contiguous()
-    num_of_latent_condition = compute_num_latent_frames(model, num_input_frames)
+    num_of_latent_condition = model.tokenizer.get_latent_num_frames(num_input_frames)
 
     sample = model.generate_samples_from_batch(
         data_batch,
