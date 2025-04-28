@@ -110,7 +110,6 @@ class GeneralDIT(nn.Module):
         **kwargs
     ) -> None:
         super().__init__()
-        print(f'{kwargs=}')
         self.max_img_h = max_img_h
         self.max_img_w = max_img_w
         self.max_frames = max_frames
@@ -173,6 +172,7 @@ class GeneralDIT(nn.Module):
         self.init_weights()
 
         self._is_context_parallel_enabled = False
+        self.cp_group = None
 
     def init_weights(self):
         self.x_embedder.init_weights()
@@ -397,6 +397,7 @@ class GeneralDIT(nn.Module):
 
         # attention
         cp_ranks = get_process_group_ranks(process_group)
+        self.cp_group = process_group
         for block in self.blocks:
             block.self_attn.set_context_parallel_group(
                 process_group=process_group,

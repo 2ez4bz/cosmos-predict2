@@ -322,9 +322,10 @@ def load_network_model(model: DiffusionT2WModel, ckpt_path: str):
     model.cuda()
 
 
-def load_tokenizer_model(model: DiffusionT2WModel, tokenizer_dir: str):
+def load_tokenizer_model(model: DiffusionT2WModel, tokenizer_dir: str, load_mean_std: bool = False, mean_std_path: str = ""):
+    assert load_mean_std and mean_std_path, "'mean_std_path' cannot be empty when loading mean_std."
     with skip_init_linear():
-        model.set_up_tokenizer(tokenizer_dir)
+        model.set_up_tokenizer(tokenizer_dir, load_mean_std=load_mean_std, mean_std_path=mean_std_path)
     model.cuda()
 
 

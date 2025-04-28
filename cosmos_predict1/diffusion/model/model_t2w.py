@@ -108,9 +108,9 @@ class DiffusionT2WModel(torch.nn.Module):
     def logvar(self):
         return self.model.logvar
 
-    def set_up_tokenizer(self, tokenizer_dir: str):
+    def set_up_tokenizer(self, tokenizer_dir: str, load_mean_std: bool = False, mean_std_path: str = ""):
         self.tokenizer: BaseVAE = lazy_instantiate(self.config.tokenizer)
-        self.tokenizer.load_weights(tokenizer_dir)
+        self.tokenizer.load_weights(tokenizer_dir, load_mean_std=load_mean_std, mean_std_path=mean_std_path)
         if hasattr(self.tokenizer, "reset_dtype"):
             self.tokenizer.reset_dtype()
 

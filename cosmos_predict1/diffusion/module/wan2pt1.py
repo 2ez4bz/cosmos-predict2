@@ -559,9 +559,6 @@ def _video_vae(
     pretrained_path=None,
     z_dim=None,
     device="cpu",
-    s3_credential_path: str = "credentials/s3_training.secret",
-    load_mean_std=False,
-    mean_std_path: str = "s3://checkpoints-us-east-1/cosmos_diffusion_v2/pretrain_weights/tokenizer/wan2pt1/mean_std.pt",
     **kwargs,
 ):
     """
@@ -585,20 +582,6 @@ def _video_vae(
 
     if pretrained_path is None:
         model.to_empty(device=device)
-        if load_mean_std:
-            img_mean, img_std = torch.randn(1, 16, 1, 1, 1, device=device), torch.randn(1, 16, 1, 1, 1, device=device)
-            video_mean, video_std = torch.randn(1, 16, 21, 1, 1, device=device), torch.randn(
-                1, 16, 21, 1, 1, device=device
-            )
-    # sync_model_states(model)
-
-    if False and load_mean_std:
-        log.info("broadcast mean and std for wan2pt1")
-        broadcast(img_mean, 0)
-        broadcast(img_std, 0)
-        broadcast(video_mean, 0)
-        broadcast(video_std, 0)
-        return model, img_mean, img_std, video_mean, video_std
 
     return (
         model,
@@ -613,10 +596,6 @@ class WanVAE:
     def __init__(
         self,
         z_dim=16,
-        vae_pth="s3://checkpoints-us-east-1/cosmos_diffusion_v2/pretrain_weights/tokenizer/wan2pt1/Wan2.1_VAE.pth",
-        s3_credential_path: str = "credentials/s3_training.secret",
-        load_mean_std=False,
-        mean_std_path: str = "s3://checkpoints-us-east-1/cosmos_diffusion_v2/pretrain_weights/tokenizer/wan2pt1/mean_std.pt",
         dtype=torch.float,
         device="cuda",
         is_amp=True,
@@ -668,9 +647,6 @@ class WanVAE:
         self.model, self.img_mean, self.img_std, self.video_mean, self.video_std = _video_vae(
             pretrained_path=None,
             z_dim=z_dim,
-            s3_credential_path=s3_credential_path,
-            load_mean_std=load_mean_std,
-            mean_std_path=mean_std_path,
             device=device,
         )
         self.model = self.model.eval().requires_grad_(False)
@@ -690,7 +666,6 @@ class WanVAE:
         videos: A list of videos each with shape [C, T, H, W].
         """
         in_dtype = videos.dtype
-        print(f'{videos.dtype=}')
         with self.context:
             if not self.is_amp:
                 videos = videos.to(self.dtype)
@@ -700,7 +675,6 @@ class WanVAE:
     @torch.no_grad()
     def decode(self, zs):
         in_dtype = zs.dtype
-        print(f'{zs.dtype=}\t{self.context=}')
         with self.context:
             if not self.is_amp:
                 zs = zs.to(self.dtype)
@@ -709,12 +683,10 @@ class WanVAE:
 
 
 class Wan2pt1VAEInterface(VideoTokenizerInterface):
-    def __init__(self, chunk_duration: int = 81, load_mean_std=False, **kwargs):
-        assert load_mean_std is False
+    def __init__(self, chunk_duration: int = 81, **kwargs):
         self.model = WanVAE(
             dtype=torch.bfloat16,
             is_amp=False,
-            load_mean_std=load_mean_std,
         )
         del kwargs
         self.device = 'cuda'
@@ -784,29 +756,24 @@ class Wan2pt1VAEInterface(VideoTokenizerInterface):
     def name(self):
         return "wan2pt1_tokenizer"
 
-    def load_weights(self, pretrained_path: str) -> None:
+    def load_weights(self, pretrained_path: str, load_mean_std: bool, mean_std_path: str = "") -> None:
         ckpt = torch.load(
             pretrained_path,
             map_location=self.device,
         )
-        if False and load_mean_std:
+
+        # load checkpoint
+        self.model.model.load_state_dict(ckpt, assign=True)
+        self.model.model.to(dtype=self.dtype)
+
+        if load_mean_std:
             img_mean_std = mean_std_path.replace("mean_std.pt", "images_mean_std.pt")
             video_mean_std = mean_std_path.replace("mean_std.pt", "video_mean_std.pt")
-            img_mean, img_std = easy_io.load(img_mean_std, backend_key=backend_key, map_location=device)
-            video_mean, video_std = easy_io.load(video_mean_std, backend_key=backend_key, map_location=device)
+            img_mean, img_std = torch.load(img_mean_std, map_location=self.device)
+            video_mean, video_std = torch.load(video_mean_std, map_location=self.device)
             img_mean = img_mean.reshape(1, 16, 1, 1, 1)
             img_std = img_std.reshape(1, 16, 1, 1, 1)
             video_mean = video_mean.reshape(1, 16, 21, 1, 1)
             video_std = video_std.reshape(1, 16, 21, 1, 1)
-
-        # load checkpoint
-        # log.info(f"loading {pretrained_path}")
-        self.model.model.load_state_dict(ckpt, assign=True)
-        self.model.model.to(dtype=self.dtype)
-
-        if False and load_mean_std:
-            log.info("broadcast mean and std for wan2pt1")
-            broadcast(img_mean, 0)
-            broadcast(img_std, 0)
-            broadcast(video_mean, 0)
-            broadcast(video_std, 0)
+            self.model.img_mean, self.model.img_std = img_mean, img_std
+            self.model.video_mean, self.model.video_std = video_mean, video_std

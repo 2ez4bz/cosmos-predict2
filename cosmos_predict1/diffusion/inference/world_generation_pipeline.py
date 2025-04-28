@@ -87,6 +87,7 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
         fps: int = 24,
         num_video_frames: int = 121,
         seed: int = 0,
+        load_mean_std: bool = False,
     ):
         """Initialize the diffusion world generation pipeline.
 
@@ -110,6 +111,7 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
             fps: Frames per second of output video
             num_video_frames: Number of frames to generate
             seed: Random seed for sampling
+            load_mean_std: Whether to load mean_std for the Tokenizer.
         """
         assert inference_type in [
             "text2world",
@@ -124,6 +126,7 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
         self.fps = fps
         self.num_video_frames = num_video_frames
         self.seed = seed
+        self.load_mean_std = load_mean_std
 
         super().__init__(
             inference_type=inference_type,
@@ -160,7 +163,9 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
         load_network_model(self.model, f"{self.checkpoint_dir}/{self.checkpoint_name}/model.pt")
 
     def _load_tokenizer(self):
-        load_tokenizer_model(self.model, f"{self.checkpoint_dir}/Wan2pt1/Wan2.1_VAE.pth")
+        load_tokenizer_model(self.model, f"{self.checkpoint_dir}/Wan2pt1/Wan2.1_VAE.pth",
+                             load_mean_std=self.load_mean_std,
+                             mean_std_path=f"{self.checkpoint_dir}/Wan2pt1/mean_std.pt")
 
     def _offload_prompt_upsampler_model(self):
         """Move prompt enhancement model to CPU/disk.
