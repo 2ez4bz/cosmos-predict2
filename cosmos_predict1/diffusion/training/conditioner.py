@@ -227,6 +227,23 @@ class VideoExtendCondition(BaseVideoCondition):
     condition_video_augment_sigma: Optional[torch.Tensor] = None
     # pose conditional input, will be concat with the input tensor
     condition_video_pose: Optional[torch.Tensor] = None
+    
+    gt_frames: Optional[torch.Tensor] = None
+    num_conditional_frames: Optional[torch.Tensor] = None
+    use_video_condition: bool = False
+    condition_video_input_mask_B_C_T_H_W: Optional[torch.Tensor] = None
+
+    def set_video_condition(
+        self,
+        gt_frames: torch.Tensor,
+        condition_video_input_mask_B_C_T_H_W: torch.Tensor,
+        num_conditional_frames: Optional[torch.Tensor] = None,
+    ):
+        kwargs = self.to_dict(skip_underscore=False)
+        kwargs["gt_frames"] = gt_frames
+        kwargs["condition_video_input_mask_B_C_T_H_W"] = condition_video_input_mask_B_C_T_H_W
+        kwargs["num_conditional_frames"] = num_conditional_frames
+        return type(self)(**kwargs)
 
 
 @dataclass

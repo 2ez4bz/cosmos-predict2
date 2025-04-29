@@ -20,7 +20,7 @@ from torch.utils.data import DataLoader, DistributedSampler
 from cosmos_predict1.diffusion.training.callbacks.iter_speed import IterSpeed
 from cosmos_predict1.diffusion.training.callbacks.low_precision import LowPrecisionCallback
 from cosmos_predict1.diffusion.training.datasets.dataset_video import Dataset
-from cosmos_predict1.diffusion.training.models.extend_model import FSDPExtendDiffusionModel
+from cosmos_predict1.diffusion.training.models.extend_model import Vid2VidModel
 from cosmos_predict1.diffusion.training.networks.general_dit_lvg import VideoExtendGeneralDIT
 from cosmos_predict1.utils import log
 from cosmos_predict1.utils.callback import ProgressBarCallback
@@ -42,12 +42,12 @@ def get_sampler(dataset):
 
 cs = ConfigStore.instance()
 
-num_frames = 121
+num_frames = 81
 example_video_dataset = L(Dataset)(
     dataset_dir="datasets/hdvila",
     sequence_interval=1,
     num_frames=num_frames,
-    video_size=(720, 1280),
+    video_size=(192, 320),
     start_frame_interval=1,
 )
 
@@ -69,47 +69,46 @@ dataloader_val = L(DataLoader)(
 )
 
 
-video2world_7b_example_hdvila = LazyDict(
+video2world_2b_example_hdvila = LazyDict(
     dict(
         defaults=[
-            {"override /net": "faditv2_7b"},
-            {"override /conditioner": "video_cond"},
-            {"override /ckpt_klass": "fsdp"},
-            {"override /checkpoint": "local"},
-            {"override /vae": "cosmos_diffusion_tokenizer_comp8x8x8"},
+            {"override /net": "cosmos_predict2_net_2b"},
+            {"override /conditioner": "video_prediction_conditioner"},
+            {"override /ckpt_klass": "dcp"},
+
+            {"override /checkpoint": "local"}, # TODO:
+            {"override /tokenizer": "wan2pt1_tokenizer"},
             "_self_",
         ],
         job=dict(
             project="posttraining",
             group="diffusion_video2world",
-            name="video2world_7b_example_hdvila",
+            name="video2world_2b_example_hdvila",
         ),
         optimizer=dict(
-            # lr=2 ** (-14.3),  # 2**(-14.3) approx 5e-5
-            lr=0.0,
+            lr=2 ** (-14.0),  # 2**(-14.3) approx 6e-5
             weight_decay=0.1,
             betas=[0.9, 0.99],
-            eps=1e-10,
+            eps=1e-08,
         ),
+        # TODO: begin
         checkpoint=dict(
             save_iter=200,
             # save_iter=1,
             broadcast_via_filesystem=False,
-            load_path="checkpoints/Cosmos-Predict1-7B-Video2World/model.pt",
+            load_path="checkpoints/Cosmos-Predict2-2B-Video2World_dcp",
             load_training_state=False,
             strict_resume=False,
             keys_not_to_resume=[],
         ),
+        # TODO: end
+
         trainer=dict(
             max_iter=2000,
-            # max_iter=2,
             distributed_parallelism="fsdp",
             logging_iter=200,
             callbacks=dict(
-                grad_clip=L(GradClip)(
-                    model_key="model",
-                    fsdp_enabled=True,
-                ),
+                grad_clip=L(GradClip)(),
                 low_prec=L(LowPrecisionCallback)(config=PLACEHOLDER, trainer=PLACEHOLDER, update_iter=1),
                 iter_speed=L(IterSpeed)(
                     every_n=10,
@@ -124,55 +123,22 @@ video2world_7b_example_hdvila = LazyDict(
             context_parallel_size=1,
         ),
         model=dict(
-            latent_shape=[
-                16,
-                16,
-                88,
-                160,
-            ],
             loss_reduce="mean",
             ema=dict(
-                enabled=True,
+                enabled=False,
             ),
-            fsdp_enabled=True,
-            fsdp=dict(
-                policy="block",
-                # checkpoint=False,
-                checkpoint=True,
-                min_num_params=1024,
-                sharding_group_size=32,
-                sharding_strategy="hybrid",
-            ),
-            net=L(VideoExtendGeneralDIT)(
-                rope_h_extrapolation_ratio=1,
-                rope_w_extrapolation_ratio=1,
-                rope_t_extrapolation_ratio=2,
-            ),
+            fsdp_shard_size=8,
+            net=L(VideoExtendGeneralDIT)(),
             adjust_video_noise=True,
-            conditioner=dict(
-                video_cond_bool=dict(
-                    condition_location="first_random_n",
-                    cfg_unconditional_type="zero_condition_region_condition_mask",
-                    apply_corruption_to_condition_region="noise_with_sigma",
-                    condition_on_augment_sigma=False,
-                    dropout_rate=0.0,  # No dropout
-                    first_random_n_num_condition_t_max=2,
-                    normalize_condition_latent=False,
-                    # Let the augment sigma mostly fall in the range of 0 to 0.3
-                    augment_sigma_sample_p_mean=-3.0,
-                    augment_sigma_sample_p_std=2.0,
-                    augment_sigma_sample_multiplier=1.0,
-                )
-            ),
-            vae=dict(pixel_chunk_duration=num_frames),
+            state_t=24,
+            resolution="256"
         ),
-        model_obj=L(FSDPExtendDiffusionModel)(
-            config=PLACEHOLDER,
-            fsdp_checkpointer=PLACEHOLDER,
+        model_obj=L(Vid2VidModel)(
+            config=PLACEHOLDER
         ),
         # warming up for first 2500 steps~(when resume from 310000)
         scheduler=dict(
-            warm_up_steps=[2500],
+            warm_up_steps=[1000],
             cycle_lengths=[10000000000000],
             f_start=[1.0e-6],
             f_max=[1.0],
@@ -186,7 +152,7 @@ video2world_7b_example_hdvila = LazyDict(
 def register_experiments(cs):
     # Register the experiments
     for _item in [
-        video2world_7b_example_hdvila,
+        video2world_2b_example_hdvila,
     ]:
         experiment_name = _item["job"]["name"]
         log.info(f"Registering experiment: {experiment_name}")

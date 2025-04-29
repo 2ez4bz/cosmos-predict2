@@ -175,6 +175,12 @@ class VideoCondBoolConfig:
     # Normalize the input condition latent
     normalize_condition_latent: bool = False
 
+@attrs.define(slots=False)
+class UseVideoConditionConfig:
+    obj: LazyDict = L(BooleanFlag)(output_key="use_video_condition")
+    dropout_rate: float = 0.2
+    input_key: str = "fps"
+
 
 @attrs.define(slots=False)
 class LatentConditionConfig:
