@@ -17,18 +17,12 @@ from typing import Any, List
 
 import attrs
 
-from cosmos_predict1.diffusion.training.config.base.model import MultiviewModelConfig
+from cosmos_predict1.diffusion.training.config.base.model import Vid2VidModelConfig
 from cosmos_predict1.diffusion.training.config.text2world.registry import (
     register_configs as register_configs_text2world,
 )
-from cosmos_predict1.diffusion.training.config.text2world_multiview.registry import (
-    register_configs as register_configs_text2world_multiview,
-)
 from cosmos_predict1.diffusion.training.config.video2world.registry import (
     register_configs as register_configs_video2world,
-)
-from cosmos_predict1.diffusion.training.config.video2world_multiview.registry import (
-    register_configs as register_configs_video2world_multiview,
 )
 from cosmos_predict1.diffusion.training.models.model import DiffusionModel
 from cosmos_predict1.utils import config
@@ -53,9 +47,8 @@ class Config(config.Config):
             {"callbacks": None},
             {"net": None},
             {"conditioner": "add_fps_image_size_padding_mask"},
-            {"fsdp": None},
             {"ema": "power"},
-            {"vae": "vae1"},
+            {"tokenizer": "wan2pt1_tokenizer"},
             {"checkpoint": "pbss"},
             {"ckpt_klass": "fsdp"},
             # the list is with order, we need global experiment to be the last one
@@ -69,7 +62,7 @@ class Config(config.Config):
 
 def make_config():
     c = Config(
-        model=MultiviewModelConfig(),
+        model=Vid2VidModelConfig(),
         optimizer=None,
         scheduler=None,
         dataloader_train=None,
@@ -82,7 +75,6 @@ def make_config():
     c.job.name = "delete_${now:%Y-%m-%d}_${now:%H-%M-%S}"
 
     c.trainer.type = Trainer
-    # c.trainer.straggler_detection.enabled = False
     c.trainer.max_iter = 400_000
     c.trainer.logging_iter = 10
     c.trainer.validation_iter = 100
@@ -94,14 +86,10 @@ def make_config():
     # Call this function to register config groups.
     register_configs_text2world()
     register_configs_video2world()
-    register_configs_text2world_multiview()
-    register_configs_video2world_multiview()
 
     # experiment config are defined in the experiment folder
     # call import_all_modules_from_package to register them
     import_all_modules_from_package("cosmos_predict1.diffusion.training.config.text2world", reload=True)
     import_all_modules_from_package("cosmos_predict1.diffusion.training.config.video2world", reload=True)
-    import_all_modules_from_package("cosmos_predict1.diffusion.training.config.text2world_multiview", reload=True)
-    import_all_modules_from_package("cosmos_predict1.diffusion.training.config.video2world_multiview", reload=True)
 
     return c

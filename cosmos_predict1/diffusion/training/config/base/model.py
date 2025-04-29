@@ -13,25 +13,18 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from enum import Enum
 from typing import List
 
 import attrs
 
-from cosmos_predict1.diffusion.training.config.base.ema import PowerEMAConfig
+from cosmos_predict1.diffusion.training.config.base.ema import PowerEMAConfig, EMAConfig
 from cosmos_predict1.diffusion.training.modules.edm_sde import EDMSDE
 from cosmos_predict1.utils.lazy_config import LazyCall as L
 from cosmos_predict1.utils.lazy_config import LazyDict
 
 
-@attrs.define(slots=False)
-class EMAConfig:
-    """
-    Config for the EMA.
-    """
 
-    enabled: bool = True
-    rate: float = 0.1
-    iteration_shift: int = 0
 
 @attrs.define(slots=False)
 class DefaultModelConfig:
@@ -42,7 +35,7 @@ class DefaultModelConfig:
     tokenizer: LazyDict = None
     conditioner: LazyDict = None
     net: LazyDict = None
-    ema: EMAConfig = EMAConfig()
+    ema: EMAConfig = PowerEMAConfig
     sde: LazyDict = L(EDMSDE)(
         p_mean=0.0,
         p_std=1.0,
@@ -62,13 +55,21 @@ class DefaultModelConfig:
     state_ch: int = 16  # for latent model, ref to the latent channel number
     state_t: int = 8  # for latent model, ref to the latent number of frames
     resolution: str = "512"
-    scaling: str = "edm"
+    scaling: str = "rectified_flow"
     resize_online: bool = False  # whether or not resize the video online; usecase: we load a long duration video and resize to fewer frames, simulate low fps video. If true, it use tokenizer and state_t to infer the expected length of the resized video.
 
     def __post_init__(self):
-        assert self.scaling in ["edm", "rectified_flow"]
+        assert self.scaling == "rectified_flow"
+
+
+class ConditioningStrategy(Enum):
+    FRAME_REPLACE = "frame_replace"  # First few frames of the video are replaced with the conditional frames
+    CHANNEL_CONCAT = "channel_concat"  # First few frames of the video are concatenated in the channel dimension
 
 
 @attrs.define(slots=False)
-class MultiviewModelConfig(DefaultModelConfig):
-    n_views: int = 6
+class Vid2VidModelConfig(DefaultModelConfig):
+    min_num_conditional_frames: int = 1  # Minimum number of latent conditional frames
+    max_num_conditional_frames: int = 2  # Maximum number of latent conditional frames
+    sigma_conditional: float = 0.0001  # Noise level used for conditional frames
+    conditioning_strategy: str = str(ConditioningStrategy.FRAME_REPLACE)  # What strategy to use for conditioning

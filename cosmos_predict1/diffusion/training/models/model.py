@@ -30,10 +30,11 @@ from dataclasses import dataclass, fields
 
 from cosmos_predict1.diffusion.modules.res_sampler import COMMON_SOLVER_OPTIONS
 from cosmos_predict1.diffusion.training.conditioner import BaseVideoCondition, DataType
+from cosmos_predict1.diffusion.conditioner import CosmosCondition # TODO:
 from cosmos_predict1.diffusion.training.context_parallel import cat_outputs_cp, split_inputs_cp
-from cosmos_predict1.diffusion.training.models.model_image import CosmosCondition
-from cosmos_predict1.diffusion.training.models.model_image import DiffusionModel as ImageModel
-from cosmos_predict1.diffusion.training.models.model_image import diffusion_fsdp_class_decorator
+# from cosmos_predict1.diffusion.training.models.model_image import CosmosCondition
+# from cosmos_predict1.diffusion.training.models.model_image import DiffusionModel as ImageModel
+# from cosmos_predict1.diffusion.training.models.model_image import diffusion_fsdp_class_decorator
 from cosmos_predict1.utils import distributed, log, misc
 from cosmos_predict1.utils.model import Model
 from cosmos_predict1.diffusion.training.utils.dtensor_helper import DTensorFastEmaModelUpdater, broadcast_dtensor_model_states
@@ -147,9 +148,10 @@ def broadcast(
     return item
 
 class DiffusionModel(Model):
-    def __init__(self, config, **kwargs): #TODO: gets fsdp_checkpointer
+    def __init__(self, config, **kwargs):
         super().__init__()
-
+        #TODO: 
+        print(f'excessive model kwargs: {kwargs.keys()}')
         self.config = config
 
         # how many sample have been processed

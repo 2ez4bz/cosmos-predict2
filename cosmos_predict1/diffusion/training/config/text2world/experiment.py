@@ -382,7 +382,7 @@ text2world_7b_example_cosmos_nemo_assets = LazyDict(
     dict(
         defaults=[
             {"override /net": "COSMOS_PREDICT2_NETConfig"},
-            {"override /ckpt_klass": "fsdp"},
+            {"override /ckpt_klass": "dcp"},
             {"override /checkpoint": "local"},
             {"override /tokenizer": "wan2pt1_tokenizer"},
             {"override /conditioner": "add_text_fps_padding_mask"},
@@ -402,7 +402,7 @@ text2world_7b_example_cosmos_nemo_assets = LazyDict(
         checkpoint=dict(
             save_iter=200,
             broadcast_via_filesystem=False,
-            load_path="checkpoints/Cosmos-Predict1-7B-Text2World/model.pt",
+            load_path="checkpoints/Cosmos-Predict2-14B-Text2World_dcp",
             load_training_state=False,
             strict_resume=False,
             keys_not_to_resume=[],
