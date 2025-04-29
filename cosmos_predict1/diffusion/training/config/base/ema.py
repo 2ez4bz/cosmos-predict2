@@ -13,15 +13,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from cosmos_predict1.utils.ema import EMAModelTracker, PowerEMATracker
-from cosmos_predict1.utils.lazy_config import PLACEHOLDER
-from cosmos_predict1.utils.lazy_config import LazyCall as L
-from cosmos_predict1.utils.lazy_config import LazyDict
+import attrs
 
-PowerEMAConfig: LazyDict = L(PowerEMATracker.initialize_multi_rank_ema)(
-    model=PLACEHOLDER, enabled=True, rate=0.10, num=3
-)
+@attrs.define(slots=False)
+class EMAConfig:
+    """
+    Config for the EMA.
+    """
 
-RegEMAConfig: LazyDict = L(EMAModelTracker.initialize_multi_rank_ema)(
-    model=PLACEHOLDER, enabled=True, rate=0.999, num=1
+    enabled: bool = True
+    rate: float = 0.1
+    iteration_shift: int = 0
+
+PowerEMAConfig: EMAConfig = EMAConfig(
+    enabled=True,
+    rate=0.10,
+    iteration_shift=0,
 )

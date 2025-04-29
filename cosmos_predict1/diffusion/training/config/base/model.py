@@ -18,21 +18,13 @@ from typing import List
 
 import attrs
 
-from cosmos_predict1.diffusion.training.config.base.ema import PowerEMAConfig
+from cosmos_predict1.diffusion.training.config.base.ema import PowerEMAConfig, EMAConfig
 from cosmos_predict1.diffusion.training.modules.edm_sde import EDMSDE
 from cosmos_predict1.utils.lazy_config import LazyCall as L
 from cosmos_predict1.utils.lazy_config import LazyDict
 
 
-@attrs.define(slots=False)
-class EMAConfig:
-    """
-    Config for the EMA.
-    """
 
-    enabled: bool = True
-    rate: float = 0.1
-    iteration_shift: int = 0
 
 @attrs.define(slots=False)
 class DefaultModelConfig:
@@ -43,7 +35,7 @@ class DefaultModelConfig:
     tokenizer: LazyDict = None
     conditioner: LazyDict = None
     net: LazyDict = None
-    ema: EMAConfig = EMAConfig()
+    ema: EMAConfig = PowerEMAConfig
     sde: LazyDict = L(EDMSDE)(
         p_mean=0.0,
         p_std=1.0,
@@ -69,10 +61,6 @@ class DefaultModelConfig:
     def __post_init__(self):
         assert self.scaling == "rectified_flow"
 
-
-@attrs.define(slots=False)
-class MultiviewModelConfig(DefaultModelConfig):
-    n_views: int = 6
 
 class ConditioningStrategy(Enum):
     FRAME_REPLACE = "frame_replace"  # First few frames of the video are replaced with the conditional frames

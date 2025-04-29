@@ -224,8 +224,3 @@ class Vid2VidModel(T2VModel):
             return raw_x0
 
         return x0_fn
-
-
-# TODO: remove
-class FSDPExtendDiffusionModel:
-    pass

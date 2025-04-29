@@ -38,7 +38,7 @@ from cosmos_predict1.utils.ema import PowerEMATracker
 from cosmos_predict1.utils.lazy_config import PLACEHOLDER
 from cosmos_predict1.utils.lazy_config import LazyCall as L
 from cosmos_predict1.utils.lazy_config import LazyDict
-from cosmos_predict1.diffusion.training.config.base.model import EMAConfig
+from cosmos_predict1.diffusion.training.config.base.model import PowerEMAConfig
 from cosmos_predict1.utils.dcp_checkpointer import DistributedCheckpointer
 
 FSDP_CHECKPOINTER: Dict[str, str] = L(FSDPCheckpointer)()
@@ -162,14 +162,8 @@ def register_vae(cs):
         node=get_wan2pt1_tokenizer(),
     )
 
-PowerEMAConfig: LazyDict = L(PowerEMATracker.initialize_multi_rank_ema)(
-    model=PLACEHOLDER, enabled=True, rate=0.10, num=3
-)
-
-
 def register_ema(cs):
-    # cs.store(group="ema", package="model.ema", name="power", node=PowerEMAConfig)
-    cs.store(group="ema", package="model.ema", name="power", node=EMAConfig) #TDOO: change name
+    cs.store(group="ema", package="model.ema", name="power", node=PowerEMAConfig)
 
 
 def register_optimizer(cs):
