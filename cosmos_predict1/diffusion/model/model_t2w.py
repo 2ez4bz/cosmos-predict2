@@ -14,7 +14,6 @@
 # limitations under the License.
 
 import torch
-from diffusers import EDMEulerScheduler
 from megatron.core import parallel_state
 from torch import Tensor
 
@@ -22,6 +21,7 @@ from cosmos_predict1.diffusion.conditioner import BaseVideoCondition
 from cosmos_predict1.diffusion.module import parallel
 from cosmos_predict1.diffusion.module.blocks import FourierFeatures
 from cosmos_predict1.diffusion.module.parallel import cat_outputs_cp, split_inputs_cp
+from cosmos_predict1.diffusion.model.scheduler import RectifiedFlowScheduler
 from cosmos_predict1.diffusion.module.pretrained_vae import BaseVAE
 from cosmos_predict1.utils import log, misc
 from cosmos_predict1.utils.lazy_config import instantiate as lazy_instantiate
@@ -59,7 +59,7 @@ class DiffusionT2WModel(torch.nn.Module):
         self.setup_data_key()
 
         # 2. setup up diffusion processing and scaling~(pre-condition), sampler
-        self.scheduler = EDMEulerScheduler(sigma_max=80, sigma_min=0.0002, sigma_data=self.sigma_data)
+        self.scheduler = RectifiedFlowScheduler(sigma_max=80, sigma_min=0.0002, sigma_data=self.sigma_data)
         self.tokenizer = None
         self.model = None
 
@@ -75,9 +75,9 @@ class DiffusionT2WModel(torch.nn.Module):
     def logvar(self):
         return self.model.logvar
 
-    def set_up_tokenizer(self, tokenizer_dir: str):
+    def set_up_tokenizer(self, tokenizer_dir: str, load_mean_std: bool = False, mean_std_path: str = ""):
         self.tokenizer: BaseVAE = lazy_instantiate(self.config.tokenizer)
-        self.tokenizer.load_weights(tokenizer_dir)
+        self.tokenizer.load_weights(tokenizer_dir, load_mean_std=load_mean_std, mean_std_path=mean_std_path)
         if hasattr(self.tokenizer, "reset_dtype"):
             self.tokenizer.reset_dtype()
 
@@ -178,8 +178,10 @@ class DiffusionT2WModel(torch.nn.Module):
             xt_scaled = self.scheduler.scale_model_input(xt, timestep=t)
             # Predict the noise residual
             t = t.to(**self.tensor_kwargs)
-            net_output_cond = self.net(x=xt_scaled, timesteps=t, **condition.to_dict())
-            net_output_uncond = self.net(x=xt_scaled, timesteps=t, **uncondition.to_dict())
+            ones_B = torch.ones(xt_scaled.size(0), device=xt_scaled.device, dtype=t.dtype)
+            t = t * ones_B
+            net_output_cond = self.net(x_B_C_T_H_W=xt_scaled, timesteps_B_T=t, **condition.to_dict())
+            net_output_uncond = self.net(x_B_C_T_H_W=xt_scaled, timesteps_B_T=t, **uncondition.to_dict())
             net_output = net_output_cond + guidance * (net_output_cond - net_output_uncond)
             # Compute the previous noisy sample x_t -> x_t-1
             xt = self.scheduler.step(net_output, t, xt).prev_sample

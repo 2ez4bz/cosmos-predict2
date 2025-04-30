@@ -42,6 +42,57 @@ FADITV2Config: LazyDict = L(GeneralDIT)(
     adaln_lora_dim=256,
 )
 
+COSMOS_PREDICT2_NET_14B_Config: LazyDict = L(GeneralDIT)(
+    max_img_h=240,
+    max_img_w=240,
+    max_frames=128,
+    in_channels=16,
+    out_channels=16,
+    patch_spatial=2,
+    patch_temporal=1,
+    model_channels=5120,
+    num_blocks=36,
+    num_heads=40,
+    concat_padding_mask=True,
+    pos_emb_cls="rope3d",
+    pos_emb_learnable=False,
+    pos_emb_interpolation="crop",
+    use_adaln_lora=True,
+    adaln_lora_dim=256,
+    min_fps=1,
+    max_fps=30,
+    rope_h_extrapolation_ratio=2.0,
+    rope_w_extrapolation_ratio=2.0,
+    rope_t_extrapolation_ratio=20 / 24,
+    extra_per_block_abs_pos_emb=False,
+    rope_enable_fps_modulation=False,
+)
+
+COSMOS_PREDICT2_NET_2B_Config: LazyDict = L(GeneralDIT)(
+    max_img_h=240,
+    max_img_w=240,
+    max_frames=128,
+    in_channels=16,
+    out_channels=16,
+    patch_spatial=2,
+    patch_temporal=1,
+    model_channels=2048,
+    num_blocks=28,
+    num_heads=16,
+    concat_padding_mask=True,
+    pos_emb_cls="rope3d",
+    pos_emb_learnable=True,
+    pos_emb_interpolation="crop",
+    use_adaln_lora=True,
+    adaln_lora_dim=256,
+    min_fps=1,
+    max_fps=30,
+    rope_h_extrapolation_ratio=1.0,
+    rope_w_extrapolation_ratio=1.0,
+    rope_t_extrapolation_ratio=1.0,
+    extra_per_block_abs_pos_emb=False,
+    rope_enable_fps_modulation=False,
+)
 
 FADITV2_14B_Config = copy.deepcopy(FADITV2Config)
 FADITV2_14B_Config.model_channels = 5120

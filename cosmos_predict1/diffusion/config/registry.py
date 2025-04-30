@@ -17,13 +17,14 @@ from hydra.core.config_store import ConfigStore
 
 from cosmos_predict1.diffusion.config.base.conditioner import (
     BaseVideoConditionerConfig,
+    VideoConditionerFpsPaddingConfig,
     VideoConditionerFpsSizePaddingConfig,
     VideoConditionerFpsSizePaddingFrameRepeatConfig,
     VideoExtendConditionerConfig,
     VideoExtendConditionerFrameRepeatConfig,
 )
-from cosmos_predict1.diffusion.config.base.net import FADITV2_14B_Config, FADITV2_Multiview_Config, FADITV2Config
-from cosmos_predict1.diffusion.config.base.tokenizer import get_cosmos_diffusion_tokenizer_comp8x8x8
+from cosmos_predict1.diffusion.config.base.net import FADITV2_14B_Config, FADITV2_Multiview_Config, FADITV2Config, COSMOS_PREDICT2_NET_14B_Config, COSMOS_PREDICT2_NET_2B_Config
+from cosmos_predict1.diffusion.config.base.tokenizer import get_cosmos_diffusion_tokenizer_comp8x8x8, get_wan2pt1_tokenizer
 
 
 def register_net(cs):
@@ -45,6 +46,18 @@ def register_net(cs):
         name="faditv2_multiview_7b",
         node=FADITV2_Multiview_Config,
     )
+    cs.store(
+        group="net",
+        package="model.net",
+        name="cosmos_predict2_net_14b",
+        node=COSMOS_PREDICT2_NET_14B_Config,
+    )
+    cs.store(
+        group="net",
+        package="model.net",
+        name="cosmos_predict2_net_2b",
+        node=COSMOS_PREDICT2_NET_2B_Config,
+    )
 
 
 def register_conditioner(cs):
@@ -59,6 +72,12 @@ def register_conditioner(cs):
         package="model.conditioner",
         name="add_fps_image_size_padding_mask",
         node=VideoConditionerFpsSizePaddingConfig,
+    )
+    cs.store(
+        group="conditioner",
+        package="model.conditioner",
+        name="add_fps_padding_mask",
+        node=VideoConditionerFpsPaddingConfig,
     )
     cs.store(
         group="conditioner",
@@ -86,6 +105,13 @@ def register_tokenizer(cs):
         package="model.tokenizer",
         name="cosmos_diffusion_tokenizer_res720_comp8x8x8_t121_ver092624",
         node=get_cosmos_diffusion_tokenizer_comp8x8x8(resolution="720", chunk_duration=121),
+    )
+
+    cs.store(
+        group="tokenizer",
+        package="model.tokenizer",
+        name="wan2pt1_tokenizer",
+        node=get_wan2pt1_tokenizer(),
     )
 
 

@@ -20,7 +20,7 @@ from torch.utils.data import DataLoader, DistributedSampler
 from cosmos_predict1.diffusion.training.callbacks.iter_speed import IterSpeed
 from cosmos_predict1.diffusion.training.callbacks.low_precision import LowPrecisionCallback
 from cosmos_predict1.diffusion.training.datasets.dataset_video import Dataset
-from cosmos_predict1.diffusion.training.models.model import FSDPDiffusionModel
+from cosmos_predict1.diffusion.training.models.model import DiffusionModel as FSDPDiffusionModel
 from cosmos_predict1.utils import log
 from cosmos_predict1.utils.callback import ProgressBarCallback
 from cosmos_predict1.utils.callbacks.grad_clip import GradClip
@@ -42,7 +42,7 @@ def get_sampler(dataset):
 cs = ConfigStore.instance()
 
 n_length = 15
-num_frames = 8 * n_length + 1  # 121
+num_frames = 61  # 121
 
 # HDVILA example
 example_video_dataset_hdvila = L(Dataset)(
@@ -75,7 +75,7 @@ example_video_dataset_cosmos_nemo_assets = L(Dataset)(
     dataset_dir="datasets/cosmos_nemo_assets",
     sequence_interval=1,
     num_frames=num_frames,
-    video_size=(720, 1280),
+    video_size=(432, 768),
     start_frame_interval=1,
 )
 
@@ -285,7 +285,7 @@ text2world_14b_example_hdvila = LazyDict(
             {"override /net": "faditv2_14b"},
             {"override /ckpt_klass": "fsdp"},
             {"override /checkpoint": "local"},
-            {"override /vae": "cosmos_diffusion_tokenizer_comp8x8x8"},
+            {"override /tokenizer": "cosmos_diffusion_tokenizer_comp8x8x8"},
             {"override /conditioner": "add_fps_image_size_padding_mask"},
             "_self_",
         ],
@@ -331,12 +331,6 @@ text2world_14b_example_hdvila = LazyDict(
             context_parallel_size=8,
         ),
         model=dict(
-            latent_shape=[
-                16,  # Latent channel dim
-                16,  # Latent temporal dim
-                88,  # Latent height dim
-                160,  # Latent width dim
-            ],
             loss_reduce="mean",
             loss_scale=10.0,
             ema=dict(
@@ -387,11 +381,11 @@ text2world_14b_example_hdvila = LazyDict(
 text2world_7b_example_cosmos_nemo_assets = LazyDict(
     dict(
         defaults=[
-            {"override /net": "faditv2_7b"},
-            {"override /ckpt_klass": "fsdp"},
+            {"override /net": "COSMOS_PREDICT2_NETConfig"},
+            {"override /ckpt_klass": "dcp"},
             {"override /checkpoint": "local"},
-            {"override /vae": "cosmos_diffusion_tokenizer_comp8x8x8"},
-            {"override /conditioner": "add_fps_image_size_padding_mask"},
+            {"override /tokenizer": "wan2pt1_tokenizer"},
+            {"override /conditioner": "add_text_fps_padding_mask"},
             "_self_",
         ],
         job=dict(
@@ -408,7 +402,7 @@ text2world_7b_example_cosmos_nemo_assets = LazyDict(
         checkpoint=dict(
             save_iter=200,
             broadcast_via_filesystem=False,
-            load_path="checkpoints/Cosmos-Predict1-7B-Text2World/model.pt",
+            load_path="checkpoints/Cosmos-Predict2-14B-Text2World_dcp",
             load_training_state=False,
             strict_resume=False,
             keys_not_to_resume=[],
@@ -418,10 +412,7 @@ text2world_7b_example_cosmos_nemo_assets = LazyDict(
             distributed_parallelism="fsdp",
             logging_iter=200,
             callbacks=dict(
-                grad_clip=L(GradClip)(
-                    model_key="model",
-                    fsdp_enabled=True,
-                ),
+                grad_clip=L(GradClip)(),
                 low_prec=L(LowPrecisionCallback)(config=PLACEHOLDER, trainer=PLACEHOLDER, update_iter=1),
                 iter_speed=L(IterSpeed)(
                     every_n=10,
@@ -433,27 +424,14 @@ text2world_7b_example_cosmos_nemo_assets = LazyDict(
         model_parallel=dict(
             sequence_parallel=False,
             tensor_model_parallel_size=1,
-            context_parallel_size=8,
+            context_parallel_size=4,
         ),
         model=dict(
-            latent_shape=[
-                16,  # Latent channel dim
-                16,  # Latent temporal dim
-                88,  # Latent height dim
-                160,  # Latent width dim
-            ],
             loss_reduce="mean",
             ema=dict(
                 enabled=True,
             ),
-            fsdp_enabled=True,
-            fsdp=dict(
-                policy="block",
-                checkpoint=False,
-                min_num_params=1024,
-                sharding_group_size=32,
-                sharding_strategy="hybrid",
-            ),
+            fsdp_shard_size=8,
             net=dict(
                 in_channels=16,
                 extra_per_block_abs_pos_emb=True,
@@ -463,7 +441,7 @@ text2world_7b_example_cosmos_nemo_assets = LazyDict(
                 rope_t_extrapolation_ratio=2,
                 use_checkpoint=True
             ),
-            vae=dict(pixel_chunk_duration=num_frames),
+            tokenizer=dict(pixel_chunk_duration=num_frames),
             conditioner=dict(text=dict(dropout_rate=0.0)),
         ),
         model_obj=L(FSDPDiffusionModel)(
@@ -906,13 +884,13 @@ text2world_14b_example_cosmos_nemo_assets = LazyDict(
 def register_experiments(cs: ConfigStore) -> None:
     # Register the experiments
     for _item in [
-        text2world_7b_example_hdvila,
-        text2world_14b_example_hdvila,
+        # text2world_7b_example_hdvila,
+        # text2world_14b_example_hdvila,
         text2world_7b_example_cosmos_nemo_assets,
-        text2world_14b_example_cosmos_nemo_assets,
-        text2world_7b_example_cosmos_nemo_assets_4gpu_80gb,
-        text2world_7b_example_cosmos_nemo_assets_8gpu_40gb,
-        text2world_7b_example_cosmos_nemo_assets_4gpu_40gb,
+        # text2world_14b_example_cosmos_nemo_assets,
+        # text2world_7b_example_cosmos_nemo_assets_4gpu_80gb,
+        # text2world_7b_example_cosmos_nemo_assets_8gpu_40gb,
+        # text2world_7b_example_cosmos_nemo_assets_4gpu_40gb,
     ]:
         experiment_name = _item["job"]["name"]
         log.info(f"Registering experiment: {experiment_name}")

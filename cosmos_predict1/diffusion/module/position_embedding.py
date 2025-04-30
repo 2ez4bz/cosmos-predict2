@@ -21,7 +21,6 @@ from einops import rearrange, repeat
 from torch import nn
 from torch.distributed import ProcessGroup, get_process_group_ranks
 
-from cosmos_predict1.diffusion.module.attention import normalize
 from cosmos_predict1.diffusion.module.parallel import split_inputs_cp
 from cosmos_predict1.diffusion.module.timm import trunc_normal_
 
@@ -50,36 +49,40 @@ def get_1d_sincos_pos_embed_from_grid(embed_dim, pos):
 class VideoPositionEmb(nn.Module):
     def __init__(self):
         super().__init__()
-        self.cp_group = None
+        self._cp_group = None
 
-    def enable_context_parallel(self, cp_group: ProcessGroup):
-        self.cp_group = cp_group
+    def enable_context_parallel(self, process_group: ProcessGroup):
+        self._cp_group = process_group
 
     def disable_context_parallel(self):
-        self.cp_group = None
+        self._cp_group = None
+
+    @property
+    def seq_dim(self):
+        return 1
 
     def forward(self, x_B_T_H_W_C: torch.Tensor, fps=Optional[torch.Tensor]) -> torch.Tensor:
         """
+        With CP, the function assume that the input tensor is already split.
         It delegates the embedding generation to generate_embeddings function.
         """
         B_T_H_W_C = x_B_T_H_W_C.shape
-        if self.cp_group is not None:
-            cp_ranks = get_process_group_ranks(self.cp_group)
+        if self._cp_group is not None:
+            cp_ranks = get_process_group_ranks(self._cp_group)
             cp_size = len(cp_ranks)
             B, T, H, W, C = B_T_H_W_C
             B_T_H_W_C = (B, T * cp_size, H, W, C)
         embeddings = self.generate_embeddings(B_T_H_W_C, fps=fps)
 
-        if self.cp_group is not None:
-            if isinstance(self, VideoRopePosition3DEmb):
-                seq_dim = 0
-            else:
-                seq_dim = 1
-            embeddings = split_inputs_cp(x=embeddings, seq_dim=seq_dim, cp_group=self.cp_group)
-        return embeddings
+        return self._split_for_context_parallel(embeddings)
 
     def generate_embeddings(self, B_T_H_W_C: torch.Size, fps=Optional[torch.Tensor]):
         raise NotImplementedError
+
+    def _split_for_context_parallel(self, embeddings):
+        if self._cp_group is not None:
+            embeddings = split_inputs_cp(x=embeddings, seq_dim=self.seq_dim, cp_group=self._cp_group)
+        return embeddings
 
 
 class VideoRopePosition3DEmb(VideoPositionEmb):
@@ -94,6 +97,7 @@ class VideoRopePosition3DEmb(VideoPositionEmb):
         h_extrapolation_ratio: float = 1.0,
         w_extrapolation_ratio: float = 1.0,
         t_extrapolation_ratio: float = 1.0,
+        enable_fps_modulation: bool = True,
         **kwargs,  # used for compatibility with other positional embeddings; unused in this class
     ):
         del kwargs
@@ -102,26 +106,43 @@ class VideoRopePosition3DEmb(VideoPositionEmb):
         self.base_fps = base_fps
         self.max_h = len_h
         self.max_w = len_w
-
+        self.max_t = len_t
+        self.enable_fps_modulation = enable_fps_modulation
         dim = head_dim
         dim_h = dim // 6 * 2
         dim_w = dim_h
         dim_t = dim - 2 * dim_h
         assert dim == dim_h + dim_w + dim_t, f"bad dim: {dim} != {dim_h} + {dim_w} + {dim_t}"
+        # TODO: (qsh 2025-01-04) this is tricky! https://github.com/pytorch/torchtitan/blob/main/torchtitan/models/llama/model.py#L361
         self.register_buffer(
             "dim_spatial_range",
-            torch.arange(0, dim_h, 2)[: (dim_h // 2)].float().cuda() / dim_h,
-            persistent=False,
+            torch.arange(0, dim_h, 2)[: (dim_h // 2)].float() / dim_h,
+            persistent=True,
         )
         self.register_buffer(
             "dim_temporal_range",
-            torch.arange(0, dim_t, 2)[: (dim_t // 2)].float().cuda() / dim_t,
-            persistent=False,
+            torch.arange(0, dim_t, 2)[: (dim_t // 2)].float() / dim_t,
+            persistent=True,
         )
+        self._dim_h = dim_h
+        self._dim_t = dim_t
 
         self.h_ntk_factor = h_extrapolation_ratio ** (dim_h / (dim_h - 2))
         self.w_ntk_factor = w_extrapolation_ratio ** (dim_w / (dim_w - 2))
         self.t_ntk_factor = t_extrapolation_ratio ** (dim_t / (dim_t - 2))
+        self.reset_parameters()
+
+    def reset_parameters(self) -> None:
+        dim_h = self._dim_h
+        dim_t = self._dim_t
+
+        self.seq = torch.arange(max(self.max_h, self.max_w, self.max_t)).float().to(self.dim_spatial_range.device)
+        self.dim_spatial_range = (
+            torch.arange(0, dim_h, 2)[: (dim_h // 2)].float().to(self.dim_spatial_range.device) / dim_h
+        )
+        self.dim_temporal_range = (
+            torch.arange(0, dim_t, 2)[: (dim_t // 2)].float().to(self.dim_spatial_range.device) / dim_t
+        )
 
     def generate_embeddings(
         self,
@@ -157,22 +178,26 @@ class VideoRopePosition3DEmb(VideoPositionEmb):
         temporal_freqs = 1.0 / (t_theta**self.dim_temporal_range)
 
         B, T, H, W, _ = B_T_H_W_C
-        uniform_fps = (fps is None) or (fps.min() == fps.max())
-        assert (
-            uniform_fps or B == 1 or T == 1
-        ), "For video batch, batch size should be 1 for non-uniform fps. For image batch, T should be 1"
         assert (
             H <= self.max_h and W <= self.max_w
         ), f"Input dimensions (H={H}, W={W}) exceed the maximum dimensions (max_h={self.max_h}, max_w={self.max_w})"
         half_emb_h = torch.outer(self.seq[:H], h_spatial_freqs)
         half_emb_w = torch.outer(self.seq[:W], w_spatial_freqs)
 
-        # apply sequence scaling in temporal dimension
-        if fps is None:  # image case
-            assert T == 1, "T should be 1 for image batch."
-            half_emb_t = torch.outer(self.seq[:T], temporal_freqs)
+        if self.enable_fps_modulation:
+            uniform_fps = (fps is None) or (fps.min() == fps.max())
+            assert (
+                uniform_fps or B == 1 or T == 1
+            ), "For video batch, batch size should be 1 for non-uniform fps. For image batch, T should be 1"
+
+            # apply sequence scaling in temporal dimension
+            if fps is None:  # image case
+                assert T == 1, "T should be 1 for image batch."
+                half_emb_t = torch.outer(self.seq[:T], temporal_freqs)
+            else:
+                half_emb_t = torch.outer(self.seq[:T] / fps[:1] * self.base_fps, temporal_freqs)
         else:
-            half_emb_t = torch.outer(self.seq[:T] / fps[:1] * self.base_fps, temporal_freqs)
+            half_emb_t = torch.outer(self.seq[:T], temporal_freqs)
 
         em_T_H_W_D = torch.cat(
             [
@@ -185,6 +210,10 @@ class VideoRopePosition3DEmb(VideoPositionEmb):
         )
 
         return rearrange(em_T_H_W_D, "t h w d -> (t h w) 1 1 d").float()
+
+    @property
+    def seq_dim(self):
+        return 0
 
 
 class LearnablePosEmbAxis(VideoPositionEmb):
@@ -230,7 +259,9 @@ class LearnablePosEmbAxis(VideoPositionEmb):
         else:
             raise ValueError(f"Unknown interpolation method {self.interpolation}")
 
-        return normalize(emb, dim=-1, eps=1e-6)
+        norm = torch.linalg.vector_norm(emb, dim=-1, keepdim=True, dtype=torch.float32)
+        norm = torch.add(1e-6, norm, alpha=np.sqrt(norm.numel() / emb.numel()))
+        return emb / norm.to(emb.dtype)
 
 
 class MultiviewVideoPositionEmb(nn.Module):

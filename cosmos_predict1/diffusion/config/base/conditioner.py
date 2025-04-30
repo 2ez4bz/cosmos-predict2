@@ -27,7 +27,7 @@ from cosmos_predict1.utils.lazy_config import LazyDict
 class TextConfig:
     obj: LazyDict = L(TextAttr)()  # No arguments
     dropout_rate: float = 0.2
-    input_keys: List[str] = attrs.field(factory=lambda: ["t5_text_embeddings", "t5_text_mask"])
+    input_keys: List[str] = attrs.field(factory=lambda: ["t5_text_embeddings"])
 
 
 class BooleanFlag(BaseConditionEntry):
@@ -175,6 +175,12 @@ class VideoCondBoolConfig:
     # Normalize the input condition latent
     normalize_condition_latent: bool = False
 
+@attrs.define(slots=False)
+class UseVideoConditionConfig:
+    obj: LazyDict = L(BooleanFlag)(output_key="use_video_condition")
+    dropout_rate: float = 0.2
+    input_key: str = "fps"
+
 
 @attrs.define(slots=False)
 class LatentConditionConfig:
@@ -226,6 +232,12 @@ VideoConditionerFpsSizePaddingFrameRepeatConfig: LazyDict = L(VideoConditioner)(
     image_size=ImageSizeConfig(),
     padding_mask=PaddingMaskConfig(),
     frame_repeat=FrameRepeatConfig(),
+)
+
+VideoConditionerFpsPaddingConfig: LazyDict = L(VideoConditioner)(
+    text=TextConfig(),
+    fps=FPSConfig(),
+    padding_mask=PaddingMaskConfig(),
 )
 
 VideoExtendConditionerFrameRepeatConfig: LazyDict = L(VideoExtendConditioner)(

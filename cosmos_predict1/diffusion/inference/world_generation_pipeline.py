@@ -51,16 +51,8 @@ from cosmos_predict1.utils import log
 from cosmos_predict1.utils.base_world_generation_pipeline import BaseWorldGenerationPipeline
 
 MODEL_NAME_DICT = {
-    "Cosmos-Predict1-7B-Text2World": "Cosmos_Predict1_Text2World_7B",
-    "Cosmos-Predict1-14B-Text2World": "Cosmos_Predict1_Text2World_14B",
-    "Cosmos-Predict1-7B-Video2World": "Cosmos_Predict1_Video2World_7B",
-    "Cosmos-Predict1-14B-Video2World": "Cosmos_Predict1_Video2World_14B",
-    "Cosmos-Predict1-7B-Text2World_post-trained": "Cosmos_Predict1_Text2World_7B_Post_trained",
-    "Cosmos-Predict1-14B-Text2World_post-trained": "Cosmos_Predict1_Text2World_14B_Post_trained",
-    "Cosmos-Predict1-7B-Video2World_post-trained": "Cosmos_Predict1_Video2World_7B_Post_trained",
-    "Cosmos-Predict1-14B-Video2World_post-trained": "Cosmos_Predict1_Video2World_14B_Post_trained",
-    "Cosmos-Predict1-7B-Text2World-Sample-AV-Multiview": "Cosmos_Predict1_Text2World_7B_Multiview",
-    "Cosmos-Predict1-7B-Video2World-Sample-AV-Multiview": "Cosmos_Predict1_Video2World_7B_Multiview",
+    "Cosmos-Predict2-2B-Video2World": "Cosmos_Predict2_2B_Video2World",
+    "Cosmos-Predict2-14B-Text2World": "Cosmos_Predict2_14B_Text2World"
 }
 
 
@@ -86,6 +78,7 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
         fps: int = 24,
         num_video_frames: int = 121,
         seed: int = 0,
+        load_mean_std: bool = False,
     ):
         """Initialize the diffusion world generation pipeline.
 
@@ -109,6 +102,7 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
             fps: Frames per second of output video
             num_video_frames: Number of frames to generate
             seed: Random seed for sampling
+            load_mean_std: Whether to load mean_std for the Tokenizer (only for 81 frames).
         """
         assert inference_type in [
             "text2world",
@@ -123,6 +117,9 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
         self.fps = fps
         self.num_video_frames = num_video_frames
         self.seed = seed
+        self.load_mean_std = load_mean_std
+        if self.load_mean_std:
+            assert num_video_frames == 81, "'load_mean_std' can only be used when generating 81 frames."
 
         super().__init__(
             inference_type=inference_type,
@@ -159,7 +156,9 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
         load_network_model(self.model, f"{self.checkpoint_dir}/{self.checkpoint_name}/model.pt")
 
     def _load_tokenizer(self):
-        load_tokenizer_model(self.model, f"{self.checkpoint_dir}/Cosmos-Tokenize1-CV8x8x8-720p")
+        load_tokenizer_model(self.model, f"{self.checkpoint_dir}/Wan2pt1/Wan2.1_VAE.pth",
+                             load_mean_std=self.load_mean_std,
+                             mean_std_path=f"{self.checkpoint_dir}/Wan2pt1/mean_std.pt")
 
     def _offload_prompt_upsampler_model(self):
         """Move prompt enhancement model to CPU/disk.
@@ -569,7 +568,12 @@ class DiffusionVideo2WorldGenerationPipeline(DiffusionText2WorldGenerationPipeli
         """
         if self.offload_tokenizer:
             self._load_tokenizer()
-
+        self.model.state_shape = [
+            self.model.tokenizer.latent_ch,
+            self.model.tokenizer.get_latent_num_frames(self.num_video_frames),
+            self.height // self.model.tokenizer.spatial_compression_factor,
+            self.width // self.model.tokenizer.spatial_compression_factor,
+        ]
         condition_latent = self._run_tokenizer_encoding(image_or_video_path)
 
         if self.offload_network:

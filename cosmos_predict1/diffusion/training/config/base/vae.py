@@ -16,6 +16,7 @@
 import omegaconf
 
 from cosmos_predict1.diffusion.training.module.pretrained_vae import VideoJITTokenizer
+from cosmos_predict1.diffusion.module.wan2pt1 import Wan2pt1VAEInterface
 from cosmos_predict1.utils.lazy_config import LazyCall as L
 
 TOKENIZER_OPTIONS = {}
@@ -52,3 +53,7 @@ def get_cosmos_tokenizer_comp8x8x8(
         spatial_compression_factor=spatial_compression_factor,
         spatial_resolution=resolution,
     )
+
+@tokenizer_register("wan2pt1_tokenizer")
+def get_wan2pt1_tokenizer() -> omegaconf.dictconfig.DictConfig:
+    return L(Wan2pt1VAEInterface)(name="wan2pt1_tokenizer")

@@ -19,7 +19,7 @@ from typing import Dict
 from hydra.core.config_store import ConfigStore
 
 from cosmos_predict1.diffusion.checkpointers.ema_fsdp_checkpointer import CheckpointConfig, FSDPCheckpointer
-from cosmos_predict1.diffusion.conditioner import VideoExtendConditioner
+from cosmos_predict1.diffusion.training.conditioner import VideoExtendConditioner
 from cosmos_predict1.diffusion.config.base.conditioner import (
     FPSConfig,
     ImageSizeConfig,
@@ -27,18 +27,23 @@ from cosmos_predict1.diffusion.config.base.conditioner import (
     PaddingMaskConfig,
     TextConfig,
     VideoCondBoolConfig,
+    UseVideoConditionConfig
 )
 from cosmos_predict1.diffusion.training.conditioner import VideoConditioner
 from cosmos_predict1.diffusion.training.config.base.optim import FusedAdamWConfig, LambdaLinearSchedulerConfig
-from cosmos_predict1.diffusion.training.config.base.vae import get_cosmos_tokenizer_comp8x8x8
+from cosmos_predict1.diffusion.training.config.base.vae import get_cosmos_tokenizer_comp8x8x8, get_wan2pt1_tokenizer
 from cosmos_predict1.diffusion.training.config.text2world.experiment import register_experiments
 from cosmos_predict1.diffusion.training.networks.general_dit import GeneralDIT
 from cosmos_predict1.utils.ema import PowerEMATracker
 from cosmos_predict1.utils.lazy_config import PLACEHOLDER
 from cosmos_predict1.utils.lazy_config import LazyCall as L
 from cosmos_predict1.utils.lazy_config import LazyDict
+from cosmos_predict1.diffusion.training.config.base.model import PowerEMAConfig
+from cosmos_predict1.utils.dcp_checkpointer import DistributedCheckpointer
 
 FSDP_CHECKPOINTER: Dict[str, str] = L(FSDPCheckpointer)()
+DCP_CHECKPOINTER: Dict[str, str] = L(DistributedCheckpointer)()
+
 VideoExtendConditionerConfig: LazyDict = L(VideoExtendConditioner)(
     text=TextConfig(),
     fps=FPSConfig(),
@@ -57,6 +62,19 @@ VideoConditionerFpsSizePaddingConfig: LazyDict = L(VideoConditioner)(
     padding_mask=PaddingMaskConfig(),
 )
 
+VideoConditionerTextFpsPaddingConfig: LazyDict = L(VideoConditioner)(
+    text=TextConfig(),
+    fps=FPSConfig(),
+    padding_mask=PaddingMaskConfig(),
+)
+
+VideoPredictionConditioner: LazyDict = L(VideoExtendConditioner)(
+    text=TextConfig(),
+    fps=FPSConfig(),
+    padding_mask=PaddingMaskConfig(),
+    use_video_condition=UseVideoConditionConfig(),
+)
+
 
 def register_conditioner(cs):
     cs.store(
@@ -73,6 +91,20 @@ def register_conditioner(cs):
         node=VideoConditionerFpsSizePaddingConfig,
     )
 
+    cs.store(
+        group="conditioner",
+        package="model.conditioner",
+        name="add_text_fps_padding_mask",
+        node=VideoConditionerTextFpsPaddingConfig,
+    )
+
+    cs.store(
+        group="conditioner",
+        package="model.conditioner",
+        name="video_prediction_conditioner",
+        node=VideoPredictionConditioner,
+    )
+
 
 def register_checkpoint_credential(cs):
     CHECKPOINT_LOCAL = CheckpointConfig(
@@ -87,9 +119,11 @@ def register_checkpoint_credential(cs):
 
 def register_checkpointer(cs):
     cs.store(group="ckpt_klass", package="checkpoint.type", name="fsdp", node=FSDP_CHECKPOINTER)
+    cs.store(group="ckpt_klass", package="checkpoint.type", name="dcp", node=DCP_CHECKPOINTER)
+    
 
 
-FADITV2Config: LazyDict = L(GeneralDIT)(
+COSMOS_PREDICT2_NET_2B_Config: LazyDict = L(GeneralDIT)(
     max_img_h=240,
     max_img_w=240,
     max_frames=128,
@@ -97,48 +131,36 @@ FADITV2Config: LazyDict = L(GeneralDIT)(
     out_channels=16,
     patch_spatial=2,
     patch_temporal=1,
-    model_channels=4096,
-    block_config="FA-CA-MLP",
-    spatial_attn_win_size=1,
-    temporal_attn_win_size=1,
+    model_channels=2048,
     num_blocks=28,
-    num_heads=32,
+    num_heads=16,
     concat_padding_mask=True,
     pos_emb_cls="rope3d",
-    pos_emb_learnable=False,
+    pos_emb_learnable=True,
     pos_emb_interpolation="crop",
-    block_x_format="THWBD",
-    additional_timestamp_channels=None,
-    affline_emb_norm=True,
     use_adaln_lora=True,
     adaln_lora_dim=256,
-    legacy_patch_emb=False,
+    min_fps=1,
+    max_fps=30,
+    rope_h_extrapolation_ratio=1.0,
+    rope_w_extrapolation_ratio=1.0,
+    rope_t_extrapolation_ratio=1.0,
+    extra_per_block_abs_pos_emb=False,
+    rope_enable_fps_modulation=False,
 )
-
-FADITV2_14B_Config = copy.deepcopy(FADITV2Config)
-FADITV2_14B_Config.model_channels = 5120
-FADITV2_14B_Config.num_heads = 40
-FADITV2_14B_Config.num_blocks = 36
 
 
 def register_net(cs):
-    cs.store(group="net", package="model.net", name="faditv2_7b", node=FADITV2Config)
-    cs.store(group="net", package="model.net", name="faditv2_14b", node=FADITV2_14B_Config)
-
+    cs.store(group="net", package="model.net", name="cosmos_predict2_net_2b", node=COSMOS_PREDICT2_NET_2B_Config)
+    
 
 def register_vae(cs):
     cs.store(
-        group="vae",
-        package="model.vae",
-        name="cosmos_diffusion_tokenizer_comp8x8x8",
-        node=get_cosmos_tokenizer_comp8x8x8(resolution="720", chunk_duration=121),
+        group="tokenizer",
+        package="model.tokenizer",
+        name="wan2pt1_tokenizer",
+        node=get_wan2pt1_tokenizer(),
     )
-
-
-PowerEMAConfig: LazyDict = L(PowerEMATracker.initialize_multi_rank_ema)(
-    model=PLACEHOLDER, enabled=True, rate=0.10, num=3
-)
-
 
 def register_ema(cs):
     cs.store(group="ema", package="model.ema", name="power", node=PowerEMAConfig)

@@ -25,7 +25,7 @@ class DefaultModelConfig:
     tokenizer: LazyDict = None
     conditioner: LazyDict = None
     net: LazyDict = None
-    sigma_data: float = 0.5
+    sigma_data: float = 1.0
     precision: str = "bfloat16"
     input_data_key: str = "video"  # key to fetch input data from data_batch
     latent_shape: List[int] = [16, 24, 44, 80]  # 24 corresponig to 136 frames

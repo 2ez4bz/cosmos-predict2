@@ -24,12 +24,13 @@ from einops import rearrange
 from torch import nn
 from torch.distributed import ProcessGroup, get_process_group_ranks
 from torchvision import transforms
+import transformer_engine as te
 
 from cosmos_predict1.diffusion.conditioner import DataType
 from cosmos_predict1.diffusion.module.attention import get_normalization
 from cosmos_predict1.diffusion.module.blocks import (
     FinalLayer,
-    GeneralDITTransformerBlock,
+    Block,
     PatchEmbed,
     TimestepEmbedding,
     Timesteps,
@@ -40,6 +41,7 @@ from cosmos_predict1.utils import log
 
 class GeneralDIT(nn.Module):
     """
+    A clean impl of DIT that can load and  reproduce the training results of the original DIT model in edify_video/v4~(cosmos 1)
     A general implementation of adaln-modulated VIT-like~(DiT) transformer for video processing.
 
     Args:
@@ -51,34 +53,25 @@ class GeneralDIT(nn.Module):
         patch_spatial (tuple): Spatial resolution of patches for input processing.
         patch_temporal (int): Temporal resolution of patches for input processing.
         concat_padding_mask (bool): If True, includes a mask channel in the input to handle padding.
-        block_config (str): Configuration of the transformer block. See Notes for supported block types.
         model_channels (int): Base number of channels used throughout the model.
         num_blocks (int): Number of transformer blocks.
         num_heads (int): Number of heads in the multi-head attention layers.
         mlp_ratio (float): Expansion ratio for MLP blocks.
-        block_x_format (str): Format of input tensor for transformer blocks ('BTHWD' or 'THWBD').
         crossattn_emb_channels (int): Number of embedding channels for cross-attention.
-        use_cross_attn_mask (bool): Whether to use mask in cross-attention.
         pos_emb_cls (str): Type of positional embeddings.
         pos_emb_learnable (bool): Whether positional embeddings are learnable.
         pos_emb_interpolation (str): Method for interpolating positional embeddings.
-        affline_emb_norm (bool): Whether to normalize affine embeddings.
+        min_fps (int): Minimum frames per second.
+        max_fps (int): Maximum frames per second.
         use_adaln_lora (bool): Whether to use AdaLN-LoRA.
         adaln_lora_dim (int): Dimension for AdaLN-LoRA.
         rope_h_extrapolation_ratio (float): Height extrapolation ratio for RoPE.
         rope_w_extrapolation_ratio (float): Width extrapolation ratio for RoPE.
         rope_t_extrapolation_ratio (float): Temporal extrapolation ratio for RoPE.
         extra_per_block_abs_pos_emb (bool): Whether to use extra per-block absolute positional embeddings.
-        extra_per_block_abs_pos_emb_type (str): Type of extra per-block positional embeddings.
         extra_h_extrapolation_ratio (float): Height extrapolation ratio for extra embeddings.
         extra_w_extrapolation_ratio (float): Width extrapolation ratio for extra embeddings.
         extra_t_extrapolation_ratio (float): Temporal extrapolation ratio for extra embeddings.
-
-    Notes:
-        Supported block types in block_config:
-        * cross_attn, ca: Cross attention
-        * full_attn: Full attention on all flattened tokens
-        * mlp, ff: Feed forward block
     """
 
     def __init__(
@@ -92,30 +85,29 @@ class GeneralDIT(nn.Module):
         patch_temporal: int,
         concat_padding_mask: bool = True,
         # attention settings
-        block_config: str = "FA-CA-MLP",
         model_channels: int = 768,
         num_blocks: int = 10,
         num_heads: int = 16,
         mlp_ratio: float = 4.0,
-        block_x_format: str = "BTHWD",
         # cross attention settings
         crossattn_emb_channels: int = 1024,
-        use_cross_attn_mask: bool = False,
         # positional embedding settings
         pos_emb_cls: str = "sincos",
         pos_emb_learnable: bool = False,
         pos_emb_interpolation: str = "crop",
-        affline_emb_norm: bool = False,  # whether or not to normalize the affine embedding
+        min_fps: int = 1,  # 1 for getty video
+        max_fps: int = 30,  # 120 for getty video but let's use 30
         use_adaln_lora: bool = False,
         adaln_lora_dim: int = 256,
         rope_h_extrapolation_ratio: float = 1.0,
         rope_w_extrapolation_ratio: float = 1.0,
         rope_t_extrapolation_ratio: float = 1.0,
         extra_per_block_abs_pos_emb: bool = False,
-        extra_per_block_abs_pos_emb_type: str = "sincos",
         extra_h_extrapolation_ratio: float = 1.0,
         extra_w_extrapolation_ratio: float = 1.0,
         extra_t_extrapolation_ratio: float = 1.0,
+        rope_enable_fps_modulation: bool = True,
+        **kwargs
     ) -> None:
         super().__init__()
         self.max_img_h = max_img_h
@@ -128,26 +120,24 @@ class GeneralDIT(nn.Module):
         self.num_heads = num_heads
         self.num_blocks = num_blocks
         self.model_channels = model_channels
-        self.use_cross_attn_mask = use_cross_attn_mask
         self.concat_padding_mask = concat_padding_mask
         # positional embedding settings
         self.pos_emb_cls = pos_emb_cls
         self.pos_emb_learnable = pos_emb_learnable
         self.pos_emb_interpolation = pos_emb_interpolation
-        self.affline_emb_norm = affline_emb_norm
+        self.min_fps = min_fps
+        self.max_fps = max_fps
         self.rope_h_extrapolation_ratio = rope_h_extrapolation_ratio
         self.rope_w_extrapolation_ratio = rope_w_extrapolation_ratio
         self.rope_t_extrapolation_ratio = rope_t_extrapolation_ratio
         self.extra_per_block_abs_pos_emb = extra_per_block_abs_pos_emb
-        self.extra_per_block_abs_pos_emb_type = extra_per_block_abs_pos_emb_type.lower()
         self.extra_h_extrapolation_ratio = extra_h_extrapolation_ratio
         self.extra_w_extrapolation_ratio = extra_w_extrapolation_ratio
         self.extra_t_extrapolation_ratio = extra_t_extrapolation_ratio
+        self.rope_enable_fps_modulation = rope_enable_fps_modulation
 
         self.build_patch_embed()
         self.build_pos_embed()
-        self.cp_group = None
-        self.block_x_format = block_x_format
         self.use_adaln_lora = use_adaln_lora
         self.adaln_lora_dim = adaln_lora_dim
         self.t_embedder = nn.Sequential(
@@ -155,54 +145,20 @@ class GeneralDIT(nn.Module):
             TimestepEmbedding(model_channels, model_channels, use_adaln_lora=use_adaln_lora),
         )
 
-        self.blocks = nn.ModuleDict()
+        self.blocks = nn.ModuleList(
+            [
+                Block(
+                    x_dim=model_channels,
+                    context_dim=crossattn_emb_channels,
+                    num_heads=num_heads,
+                    mlp_ratio=mlp_ratio,
+                    use_adaln_lora=use_adaln_lora,
+                    adaln_lora_dim=adaln_lora_dim,
+                )
+                for _ in range(num_blocks)
+            ]
+        )
 
-        for idx in range(num_blocks):
-            self.blocks[f"block{idx}"] = GeneralDITTransformerBlock(
-                x_dim=model_channels,
-                context_dim=crossattn_emb_channels,
-                num_heads=num_heads,
-                block_config=block_config,
-                mlp_ratio=mlp_ratio,
-                x_format=self.block_x_format,
-                use_adaln_lora=use_adaln_lora,
-                adaln_lora_dim=adaln_lora_dim,
-            )
-
-        self.build_decode_head()
-        if self.affline_emb_norm:
-            log.debug("Building affine embedding normalization layer")
-            self.affline_norm = get_normalization("R", model_channels)
-        else:
-            self.affline_norm = nn.Identity()
-        self.initialize_weights()
-
-    def initialize_weights(self):
-        # Initialize transformer layers:
-        def _basic_init(module):
-            if isinstance(module, nn.Linear):
-                torch.nn.init.xavier_uniform_(module.weight)
-                if module.bias is not None:
-                    nn.init.constant_(module.bias, 0)
-
-        self.apply(_basic_init)
-
-        # Initialize timestep embedding
-        nn.init.normal_(self.t_embedder[1].linear_1.weight, std=0.02)
-        if self.t_embedder[1].linear_1.bias is not None:
-            nn.init.constant_(self.t_embedder[1].linear_1.bias, 0)
-        nn.init.normal_(self.t_embedder[1].linear_2.weight, std=0.02)
-        if self.t_embedder[1].linear_2.bias is not None:
-            nn.init.constant_(self.t_embedder[1].linear_2.bias, 0)
-
-        # Zero-out adaLN modulation layers in DiT blocks:
-        for transformer_block in self.blocks.values():
-            for block in transformer_block.blocks:
-                nn.init.constant_(block.adaLN_modulation[-1].weight, 0)
-                if block.adaLN_modulation[-1].bias is not None:
-                    nn.init.constant_(block.adaLN_modulation[-1].bias, 0)
-
-    def build_decode_head(self):
         self.final_layer = FinalLayer(
             hidden_size=self.model_channels,
             spatial_patch_size=self.patch_spatial,
@@ -211,6 +167,25 @@ class GeneralDIT(nn.Module):
             use_adaln_lora=self.use_adaln_lora,
             adaln_lora_dim=self.adaln_lora_dim,
         )
+
+        self.t_embedding_norm = te.pytorch.RMSNorm(model_channels, eps=1e-6)
+        self.init_weights()
+
+        self._is_context_parallel_enabled = False
+        self.cp_group = None
+
+    def init_weights(self):
+        self.x_embedder.init_weights()
+        self.pos_embedder.reset_parameters()
+        if self.extra_per_block_abs_pos_emb:
+            self.extra_pos_embedder.reset_parameters()
+
+        self.t_embedder[1].init_weights()
+        for block in self.blocks:
+            block.init_weights()
+
+        self.final_layer.init_weights()
+        self.t_embedding_norm.reset_parameters()
 
     def build_patch_embed(self):
         (
@@ -232,7 +207,6 @@ class GeneralDIT(nn.Module):
             temporal_patch_size=patch_temporal,
             in_channels=in_channels,
             out_channels=model_channels,
-            bias=False,
         )
 
     def build_pos_embed(self):
@@ -247,21 +221,21 @@ class GeneralDIT(nn.Module):
             len_h=self.max_img_h // self.patch_spatial,
             len_w=self.max_img_w // self.patch_spatial,
             len_t=self.max_frames // self.patch_temporal,
+            max_fps=self.max_fps,
+            min_fps=self.min_fps,
             is_learnable=self.pos_emb_learnable,
             interpolation=self.pos_emb_interpolation,
             head_dim=self.model_channels // self.num_heads,
             h_extrapolation_ratio=self.rope_h_extrapolation_ratio,
             w_extrapolation_ratio=self.rope_w_extrapolation_ratio,
             t_extrapolation_ratio=self.rope_t_extrapolation_ratio,
+            enable_fps_modulation=self.rope_enable_fps_modulation,
         )
         self.pos_embedder = cls_type(
             **kwargs,
         )
 
         if self.extra_per_block_abs_pos_emb:
-            assert self.extra_per_block_abs_pos_emb_type in [
-                "learnable",
-            ], f"Unknown extra_per_block_abs_pos_emb_type {self.extra_per_block_abs_pos_emb_type}"
             kwargs["h_extrapolation_ratio"] = self.extra_h_extrapolation_ratio
             kwargs["w_extrapolation_ratio"] = self.extra_w_extrapolation_ratio
             kwargs["t_extrapolation_ratio"] = self.extra_t_extrapolation_ratio
@@ -274,8 +248,6 @@ class GeneralDIT(nn.Module):
         x_B_C_T_H_W: torch.Tensor,
         fps: Optional[torch.Tensor] = None,
         padding_mask: Optional[torch.Tensor] = None,
-        latent_condition: Optional[torch.Tensor] = None,
-        latent_condition_sigma: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, Optional[torch.Tensor]]:
         """
         Prepares an embedded sequence tensor by applying positional embeddings and handling padding masks.
@@ -317,253 +289,123 @@ class GeneralDIT(nn.Module):
 
         if "rope" in self.pos_emb_cls.lower():
             return x_B_T_H_W_D, self.pos_embedder(x_B_T_H_W_D, fps=fps), extra_pos_emb
-
-        if "fps_aware" in self.pos_emb_cls:
-            x_B_T_H_W_D = x_B_T_H_W_D + self.pos_embedder(x_B_T_H_W_D, fps=fps)  # [B, T, H, W, D]
-        else:
-            x_B_T_H_W_D = x_B_T_H_W_D + self.pos_embedder(x_B_T_H_W_D)  # [B, T, H, W, D]
+        x_B_T_H_W_D = x_B_T_H_W_D + self.pos_embedder(x_B_T_H_W_D)  # [B, T, H, W, D]
 
         return x_B_T_H_W_D, None, extra_pos_emb
 
-    def decoder_head(
-        self,
-        x_B_T_H_W_D: torch.Tensor,
-        emb_B_D: torch.Tensor,
-        crossattn_emb: torch.Tensor,
-        origin_shape: Tuple[int, int, int, int, int],  # [B, C, T, H, W]
-        crossattn_mask: Optional[torch.Tensor] = None,
-        adaln_lora_B_3D: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
-        del crossattn_emb, crossattn_mask
-        B, C, T_before_patchify, H_before_patchify, W_before_patchify = origin_shape
-        x_BT_HW_D = rearrange(x_B_T_H_W_D, "B T H W D -> (B T) (H W) D")
-        x_BT_HW_D = self.final_layer(x_BT_HW_D, emb_B_D, adaln_lora_B_3D=adaln_lora_B_3D)
-        # This is to ensure x_BT_HW_D has the correct shape because
-        # when we merge T, H, W into one dimension, x_BT_HW_D has shape (B * T * H * W, 1*1, D).
-        x_BT_HW_D = x_BT_HW_D.view(
-            B * T_before_patchify // self.patch_temporal,
-            H_before_patchify // self.patch_spatial * W_before_patchify // self.patch_spatial,
-            -1,
-        )
-        x_B_D_T_H_W = rearrange(
-            x_BT_HW_D,
-            "(B T) (H W) (p1 p2 t C) -> B C (T t) (H p1) (W p2)",
+    def unpatchify(self, x_B_T_H_W_M):
+        x_B_C_Tt_Hp_Wp = rearrange(
+            x_B_T_H_W_M,
+            "B T H W (p1 p2 t C) -> B C (T t) (H p1) (W p2)",
             p1=self.patch_spatial,
             p2=self.patch_spatial,
-            H=H_before_patchify // self.patch_spatial,
-            W=W_before_patchify // self.patch_spatial,
             t=self.patch_temporal,
-            B=B,
         )
-        return x_B_D_T_H_W
-
-    def forward_before_blocks(
-        self,
-        x: torch.Tensor,
-        timesteps: torch.Tensor,
-        crossattn_emb: torch.Tensor,
-        crossattn_mask: Optional[torch.Tensor] = None,
-        fps: Optional[torch.Tensor] = None,
-        image_size: Optional[torch.Tensor] = None,
-        padding_mask: Optional[torch.Tensor] = None,
-        scalar_feature: Optional[torch.Tensor] = None,
-        data_type: Optional[DataType] = DataType.VIDEO,
-        latent_condition: Optional[torch.Tensor] = None,
-        latent_condition_sigma: Optional[torch.Tensor] = None,
-        **kwargs,
-    ) -> torch.Tensor:
-        """
-        Args:
-            x: (B, C, T, H, W) tensor of spatial-temp inputs
-            timesteps: (B, ) tensor of timesteps
-            crossattn_emb: (B, N, D) tensor of cross-attention embeddings
-            crossattn_mask: (B, N) tensor of cross-attention masks
-        """
-        del kwargs
-        assert isinstance(
-            data_type, DataType
-        ), f"Expected DataType, got {type(data_type)}. We need discuss this flag later."
-        original_shape = x.shape
-        x_B_T_H_W_D, rope_emb_L_1_1_D, extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D = self.prepare_embedded_sequence(
-            x,
-            fps=fps,
-            padding_mask=padding_mask,
-            latent_condition=latent_condition,
-            latent_condition_sigma=latent_condition_sigma,
-        )
-        # logging affline scale information
-        affline_scale_log_info = {}
-
-        timesteps_B_D, adaln_lora_B_3D = self.t_embedder(timesteps.flatten())
-        affline_emb_B_D = timesteps_B_D
-        affline_scale_log_info["timesteps_B_D"] = timesteps_B_D.detach()
-
-        if scalar_feature is not None:
-            raise NotImplementedError("Scalar feature is not implemented yet.")
-
-        affline_scale_log_info["affline_emb_B_D"] = affline_emb_B_D.detach()
-        affline_emb_B_D = self.affline_norm(affline_emb_B_D)
-
-        if self.use_cross_attn_mask:
-            crossattn_mask = crossattn_mask[:, None, None, :].to(dtype=torch.bool)  # [B, 1, 1, length]
-        else:
-            crossattn_mask = None
-
-        if self.blocks["block0"].x_format == "THWBD":
-            x = rearrange(x_B_T_H_W_D, "B T H W D -> T H W B D")
-            if extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D is not None:
-                extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D = rearrange(
-                    extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D, "B T H W D -> T H W B D"
-                )
-            crossattn_emb = rearrange(crossattn_emb, "B M D -> M B D")
-
-            if crossattn_mask:
-                crossattn_mask = rearrange(crossattn_mask, "B M -> M B")
-
-        elif self.blocks["block0"].x_format == "BTHWD":
-            x = x_B_T_H_W_D
-        else:
-            raise ValueError(f"Unknown x_format {self.blocks[0].x_format}")
-        output = {
-            "x": x,
-            "affline_emb_B_D": affline_emb_B_D,
-            "crossattn_emb": crossattn_emb,
-            "crossattn_mask": crossattn_mask,
-            "rope_emb_L_1_1_D": rope_emb_L_1_1_D,
-            "adaln_lora_B_3D": adaln_lora_B_3D,
-            "original_shape": original_shape,
-            "extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D": extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D,
-        }
-        return output
+        return x_B_C_Tt_Hp_Wp
 
     def forward(
         self,
-        x: torch.Tensor,
-        timesteps: torch.Tensor,
+        x_B_C_T_H_W: torch.Tensor,
+        timesteps_B_T: torch.Tensor,
         crossattn_emb: torch.Tensor,
-        crossattn_mask: Optional[torch.Tensor] = None,
         fps: Optional[torch.Tensor] = None,
-        image_size: Optional[torch.Tensor] = None,
         padding_mask: Optional[torch.Tensor] = None,
-        scalar_feature: Optional[torch.Tensor] = None,
         data_type: Optional[DataType] = DataType.VIDEO,
-        latent_condition: Optional[torch.Tensor] = None,
-        latent_condition_sigma: Optional[torch.Tensor] = None,
-        condition_video_augment_sigma: Optional[torch.Tensor] = None,
-        **kwargs,
+        **kwargs
     ) -> torch.Tensor | List[torch.Tensor] | Tuple[torch.Tensor, List[torch.Tensor]]:
         """
         Args:
             x: (B, C, T, H, W) tensor of spatial-temp inputs
             timesteps: (B, ) tensor of timesteps
             crossattn_emb: (B, N, D) tensor of cross-attention embeddings
-            crossattn_mask: (B, N) tensor of cross-attention masks
-            condition_video_augment_sigma: (B,) used in lvg(long video generation), we add noise with this sigma to
-                augment condition input, the lvg model will condition on the condition_video_augment_sigma value;
-                we need forward_before_blocks pass to the forward_before_blocks function.
         """
+        assert isinstance(
+            data_type, DataType
+        ), f"Expected DataType, got {type(data_type)}. We need discuss this flag later."
 
-        inputs = self.forward_before_blocks(
-            x=x,
-            timesteps=timesteps,
-            crossattn_emb=crossattn_emb,
-            crossattn_mask=crossattn_mask,
+        x_B_T_H_W_D, rope_emb_L_1_1_D, extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D = self.prepare_embedded_sequence(
+            x_B_C_T_H_W,
             fps=fps,
-            image_size=image_size,
             padding_mask=padding_mask,
-            scalar_feature=scalar_feature,
-            data_type=data_type,
-            latent_condition=latent_condition,
-            latent_condition_sigma=latent_condition_sigma,
-            condition_video_augment_sigma=condition_video_augment_sigma,
-            **kwargs,
         )
-        x, affline_emb_B_D, crossattn_emb, crossattn_mask, rope_emb_L_1_1_D, adaln_lora_B_3D, original_shape = (
-            inputs["x"],
-            inputs["affline_emb_B_D"],
-            inputs["crossattn_emb"],
-            inputs["crossattn_mask"],
-            inputs["rope_emb_L_1_1_D"],
-            inputs["adaln_lora_B_3D"],
-            inputs["original_shape"],
-        )
-        extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D = inputs["extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D"]
+
+        if timesteps_B_T.ndim == 1:
+            timesteps_B_T = timesteps_B_T.unsqueeze(1)
+        t_embedding_B_T_D, adaln_lora_B_T_3D = self.t_embedder(timesteps_B_T)
+        t_embedding_B_T_D = self.t_embedding_norm(t_embedding_B_T_D)
+
+        # for logging purpose
+        affline_scale_log_info = {}
+        affline_scale_log_info["t_embedding_B_T_D"] = t_embedding_B_T_D.detach()
+        self.affline_scale_log_info = affline_scale_log_info
+        self.affline_emb = t_embedding_B_T_D
+        self.crossattn_emb = crossattn_emb
+
         if extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D is not None:
             assert (
-                x.shape == extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D.shape
-            ), f"{x.shape} != {extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D.shape} {original_shape}"
+                x_B_T_H_W_D.shape == extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D.shape
+            ), f"{x_B_T_H_W_D.shape} != {extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D.shape}"
 
-        for _, block in self.blocks.items():
-            assert (
-                self.blocks["block0"].x_format == block.x_format
-            ), f"First block has x_format {self.blocks[0].x_format}, got {block.x_format}"
+        B, T, H, W, D = x_B_T_H_W_D.shape
+        # x_B_THW_D = rearrange(x_B_T_H_W_D, "b t h w d -> b (t h w) d")
 
-            x = block(
-                x,
-                affline_emb_B_D,
+        for block in self.blocks:
+            x_B_T_H_W_D = block(
+                x_B_T_H_W_D,
+                t_embedding_B_T_D,
                 crossattn_emb,
-                crossattn_mask,
                 rope_emb_L_1_1_D=rope_emb_L_1_1_D,
-                adaln_lora_B_3D=adaln_lora_B_3D,
+                adaln_lora_B_T_3D=adaln_lora_B_T_3D,
                 extra_per_block_pos_emb=extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D,
             )
+        x_B_T_H_W_O = self.final_layer(x_B_T_H_W_D, t_embedding_B_T_D, adaln_lora_B_T_3D=adaln_lora_B_T_3D)
+        x_B_C_Tt_Hp_Wp = self.unpatchify(x_B_T_H_W_O)
+        return x_B_C_Tt_Hp_Wp
 
-        x_B_T_H_W_D = rearrange(x, "T H W B D -> B T H W D")
+    def fully_shard(self, mesh):
+        for i, block in enumerate(self.blocks):
+            reshard_after_forward = i < len(self.blocks) - 1
+            fully_shard(block, mesh=mesh, reshard_after_forward=reshard_after_forward)
 
-        x_B_D_T_H_W = self.decoder_head(
-            x_B_T_H_W_D=x_B_T_H_W_D,
-            emb_B_D=affline_emb_B_D,
-            crossattn_emb=None,
-            origin_shape=original_shape,
-            crossattn_mask=None,
-            adaln_lora_B_3D=adaln_lora_B_3D,
-        )
-
-        return x_B_D_T_H_W
-
-    def enable_context_parallel(self, cp_group: ProcessGroup):
-        cp_ranks = get_process_group_ranks(cp_group)
-        cp_size = len(cp_ranks)
-        # Set these attributes for spliting the data after embedding.
-        self.cp_group = cp_group
-        # Set these attributes for computing the loss.
-        self.cp_size = cp_size
-
-        self.pos_embedder.enable_context_parallel(cp_group)
+        fully_shard(self.final_layer, mesh=mesh, reshard_after_forward=True)
         if self.extra_per_block_abs_pos_emb:
-            self.extra_pos_embedder.enable_context_parallel(cp_group)
-        # Loop through the model to set up context parallel.
-        for block in self.blocks.values():
-            for layer in block.blocks:
-                if layer.block_type in ["mlp", "ff", "cross_attn", "ca"]:
-                    continue
-                elif layer.block.attn.backend == "transformer_engine":
-                    layer.block.attn.attn_op.set_context_parallel_group(cp_group, cp_ranks, torch.cuda.Stream())
-
-        log.debug(f"[CP] Enable context parallelism with size {cp_size}")
+            fully_shard(self.extra_pos_embedder, mesh=mesh, reshard_after_forward=True)
+        fully_shard(self.t_embedder, mesh=mesh, reshard_after_forward=True)
 
     def disable_context_parallel(self):
-        self.cp_group = None
-        self.cp_size = None
-
+        # pos_embedder
         self.pos_embedder.disable_context_parallel()
         if self.extra_per_block_abs_pos_emb:
             self.extra_pos_embedder.disable_context_parallel()
 
-        # Loop through the model to disable context parallel.
-        for block in self.blocks.values():
-            for layer in block.blocks:
-                if layer.block_type in ["mlp", "ff"]:
-                    continue
-                elif layer.block_type in ["cross_attn", "ca"]:
-                    continue
-                else:
-                    layer.block.attn.attn_op.cp_group = None
-                    layer.block.attn.attn_op.cp_ranks = None
-                    layer.block.attn.attn_op.cp_stream = None
+        # attention
+        for block in self.blocks:
+            block.self_attn.set_context_parallel_group(
+                process_group=None,
+                ranks=None,
+                stream=torch.cuda.Stream(),
+            )
 
-        log.debug("[CP] Disable context parallelism.")
+        self._is_context_parallel_enabled = False
+
+    def enable_context_parallel(self, process_group: Optional[ProcessGroup] = None):
+        # pos_embedder
+        self.pos_embedder.enable_context_parallel(process_group=process_group)
+        if self.extra_per_block_abs_pos_emb:
+            self.extra_pos_embedder.enable_context_parallel(process_group=process_group)
+
+        # attention
+        cp_ranks = get_process_group_ranks(process_group)
+        self.cp_group = process_group
+        for block in self.blocks:
+            block.self_attn.set_context_parallel_group(
+                process_group=process_group,
+                ranks=cp_ranks,
+                stream=torch.cuda.Stream(),
+            )
+
+        self._is_context_parallel_enabled = True
 
     @property
     def is_context_parallel_enabled(self):
-        return self.cp_group is not None
+        return self._is_context_parallel_enabled

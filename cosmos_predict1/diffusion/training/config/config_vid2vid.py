@@ -17,7 +17,7 @@ from typing import Any, List
 
 import attrs
 
-from cosmos_predict1.diffusion.training.config.base.model import DefaultModelConfig
+from cosmos_predict1.diffusion.training.config.base.model import Vid2VidModelConfig
 from cosmos_predict1.diffusion.training.config.text2world.registry import (
     register_configs as register_configs_text2world,
 )
@@ -62,7 +62,7 @@ class Config(config.Config):
 
 def make_config():
     c = Config(
-        model=DefaultModelConfig(),
+        model=Vid2VidModelConfig(),
         optimizer=None,
         scheduler=None,
         dataloader_train=None,

@@ -17,6 +17,7 @@ from typing import List, Optional
 
 import numpy as np
 import torch
+import math
 import transformer_engine as te
 from einops import rearrange
 from torch import nn
@@ -24,73 +25,29 @@ from torch.utils.checkpoint import checkpoint
 from transformer_engine.pytorch.attention import DotProductAttention, apply_rotary_pos_emb
 
 # ---------------------- Feed Forward Network -----------------------
-
-
-class FeedForward(nn.Module):
-    """
-    Transformer FFN with optional gating
-
-    Parameters:
-        d_model (int): Dimensionality of input features.
-        d_ff (int): Dimensionality of the hidden layer.
-        dropout (float, optional): Dropout rate applied after the activation function. Defaults to 0.1.
-        activation (callable, optional): The activation function applied after the first linear layer.
-                                         Defaults to nn.ReLU().
-        is_gated (bool, optional): If set to True, incorporates gating mechanism to the feed-forward layer.
-                                   Defaults to False.
-        bias (bool, optional): If set to True, adds a bias to the linear layers. Defaults to True.
-
-    Example:
-        >>> ff = FeedForward(d_model=512, d_ff=2048)
-        >>> x = torch.randn(64, 10, 512)  # Example input tensor
-        >>> output = ff(x)
-        >>> print(output.shape)  # Expected shape: (64, 10, 512)
-    """
-
-    def __init__(
-        self,
-        d_model: int,
-        d_ff: int,
-        dropout: float = 0.1,
-        activation=nn.ReLU(),
-        is_gated: bool = False,
-        bias: bool = False,
-    ) -> None:
+class GPT2FeedForward(nn.Module):
+    def __init__(self, d_model: int, d_ff: int):
         super().__init__()
+        self.activation = nn.GELU()
+        self.layer1 = nn.Linear(d_model, d_ff, bias=False)
+        self.layer2 = nn.Linear(d_ff, d_model, bias=False)
 
-        self.layer1 = nn.Linear(d_model, d_ff, bias=bias)
-        self.layer2 = nn.Linear(d_ff, d_model, bias=bias)
+        self._layer_id = None
+        self._dim = d_model
+        self._hidden_dim = d_ff
+        self.init_weights()
 
-        self.dropout = nn.Dropout(dropout)
-        self.activation = activation
-        self.is_gated = is_gated
-        if is_gated:
-            self.linear_gate = nn.Linear(d_model, d_ff, bias=False)
+    def init_weights(self) -> None:
+        std = 1.0 / math.sqrt(self._dim)
+        torch.nn.init.trunc_normal_(self.layer1.weight, std=std, a=-3 * std, b=3 * std)
 
-    def forward(self, x: torch.Tensor):
-        g = self.activation(self.layer1(x))
-        if self.is_gated:
-            x = g * self.linear_gate(x)
-        else:
-            x = g
-        assert self.dropout.p == 0.0, "we skip dropout"
-        return self.layer2(x)
-
-
-class GPT2FeedForward(FeedForward):
-    def __init__(self, d_model: int, d_ff: int, dropout: float = 0.1, bias: bool = False):
-        super().__init__(
-            d_model=d_model,
-            d_ff=d_ff,
-            dropout=dropout,
-            activation=nn.GELU(),
-            is_gated=False,
-            bias=bias,
-        )
+        # scale init by depth as in https://arxiv.org/abs/1908.11365 -- worked slightly better.
+        std = 1.0 / math.sqrt(self._hidden_dim)
+        if self._layer_id is not None:
+            std = std / math.sqrt(2 * (self._layer_id + 1))
+        torch.nn.init.trunc_normal_(self.layer2.weight, std=std, a=-3 * std, b=3 * std)
 
     def forward(self, x: torch.Tensor):
-        assert self.dropout.p == 0.0, "we skip dropout"
-
         x = self.layer1(x)
 
         def activation_layer2_forward(x):
@@ -103,27 +60,6 @@ class GPT2FeedForward(FeedForward):
 
 
 # ---------------------- Normalization Layer -----------------------
-
-
-def normalize(x: torch.Tensor, dim: Optional[List[int]] = None, eps: float = 0) -> torch.Tensor:
-    """
-    Normalizes the input tensor along specified dimensions such that the average square norm of elements is adjusted.
-
-    Args:
-        x (torch.Tensor): The input tensor to normalize.
-        dim (list, optional): The dimensions over which to normalize. If None, normalizes over all dimensions except the first.
-        eps (float, optional): A small constant to ensure numerical stability during division.
-
-    Returns:
-        torch.Tensor: The normalized tensor.
-    """
-    if dim is None:
-        dim = list(range(1, x.ndim))
-    norm = torch.linalg.vector_norm(x, dim=dim, keepdim=True, dtype=torch.float32)
-    norm = torch.add(eps, norm, alpha=np.sqrt(norm.numel() / x.numel()))
-    return x / norm.to(x.dtype)
-
-
 def get_normalization(name: str, channels: int):
     if name == "I":
         return nn.Identity()
@@ -138,173 +74,181 @@ class BaseAttentionOp(nn.Module):
         super().__init__()
 
 
+def torch_attention_op(q_B_S_H_D, k_B_S_H_D, v_B_S_H_D):
+    """Computes multi-head attention using PyTorch's native implementation.
+
+    This function provides a PyTorch backend alternative to Transformer Engine's attention operation.
+    It rearranges the input tensors to match PyTorch's expected format, computes scaled dot-product
+    attention, and rearranges the output back to the original format.
+
+    The input tensor names use the following dimension conventions:
+
+    - B: batch size
+    - S: sequence length
+    - H: number of attention heads
+    - D: head dimension
+
+    Args:
+        q_B_S_H_D: Query tensor with shape (batch, seq_len, n_heads, head_dim)
+        k_B_S_H_D: Key tensor with shape (batch, seq_len, n_heads, head_dim)
+        v_B_S_H_D: Value tensor with shape (batch, seq_len, n_heads, head_dim)
+
+    Returns:
+        Attention output tensor with shape (batch, seq_len, n_heads * head_dim)
+    """
+    in_q_shape = q_B_S_H_D.shape
+    in_k_shape = k_B_S_H_D.shape
+    q_B_H_S_D = rearrange(q_B_S_H_D, "b ... h k -> b h ... k").view(in_q_shape[0], in_q_shape[-2], -1, in_q_shape[-1])
+    k_B_H_S_D = rearrange(k_B_S_H_D, "b ... h v -> b h ... v").view(in_k_shape[0], in_k_shape[-2], -1, in_k_shape[-1])
+    v_B_H_S_D = rearrange(v_B_S_H_D, "b ... h v -> b h ... v").view(in_k_shape[0], in_k_shape[-2], -1, in_k_shape[-1])
+    result_B_S_HD = rearrange(
+        torch.nn.functional.scaled_dot_product_attention(q_B_H_S_D, k_B_H_S_D, v_B_H_S_D), "b h ... l -> b ... (h l)"
+    )
+
+    return result_B_S_HD
+
+
+
 class Attention(nn.Module):
     """
-    Generalized attention impl.
+    A flexible attention module supporting both self-attention and cross-attention mechanisms.
 
-    Allowing for both self-attention and cross-attention configurations depending on whether a `context_dim` is provided.
-    If `context_dim` is None, self-attention is assumed.
+    This module implements a multi-head attention layer that can operate in either self-attention
+    or cross-attention mode. The mode is determined by whether a context dimension is provided.
+    The implementation uses scaled dot-product attention and supports optional bias terms and
+    dropout regularization.
 
-    Parameters:
-        query_dim (int): Dimension of each query vector.
-        context_dim (int, optional): Dimension of each context vector. If None, self-attention is assumed.
-        heads (int, optional): Number of attention heads. Defaults to 8.
-        dim_head (int, optional): Dimension of each head. Defaults to 64.
-        dropout (float, optional): Dropout rate applied to the output of the attention block. Defaults to 0.0.
-        attn_op (BaseAttentionOp, optional): Custom attention operation to be used instead of the default.
-        qkv_bias (bool, optional): If True, adds a learnable bias to query, key, and value projections. Defaults to False.
-        out_bias (bool, optional): If True, adds a learnable bias to the output projection. Defaults to False.
-        qkv_norm (str, optional): A string representing normalization strategies for query, key, and value projections.
-                                  Defaults to "SSI".
-        qkv_norm_mode (str, optional): A string representing normalization mode for query, key, and value projections.
-                                        Defaults to 'per_head'. Only support 'per_head'.
+    Args:
+        query_dim (int): The dimensionality of the query vectors.
+        context_dim (int, optional): The dimensionality of the context (key/value) vectors.
+            If None, the module operates in self-attention mode using query_dim. Default: None
+        n_heads (int, optional): Number of attention heads for multi-head attention. Default: 8
+        head_dim (int, optional): The dimension of each attention head. Default: 64
+        dropout (float, optional): Dropout probability applied to the output. Default: 0.0
+        qkv_format (str, optional): Format specification for QKV tensors. Default: "bshd"
+        backend (str, optional): Backend to use for the attention operation. Default: "transformer_engine"
 
     Examples:
-        >>> attn = Attention(query_dim=128, context_dim=256, heads=4, dim_head=32, dropout=0.1)
-        >>> query = torch.randn(10, 128)  # Batch size of 10
-        >>> context = torch.randn(10, 256)  # Batch size of 10
-        >>> output = attn(query, context)  # Perform the attention operation
+        >>> # Self-attention with 512 dimensions and 8 heads
+        >>> self_attn = Attention(query_dim=512)
+        >>> x = torch.randn(32, 16, 512)  # (batch_size, seq_len, dim)
+        >>> out = self_attn(x)  # (32, 16, 512)
 
-    Note:
-        https://github.com/MatthieuTPHR/diffusers/blob/d80b531ff8060ec1ea982b65a1b8df70f73aa67c/src/diffusers/cosmos_predict1/attention.py#L223
+        >>> # Cross-attention
+        >>> cross_attn = Attention(query_dim=512, context_dim=256)
+        >>> query = torch.randn(32, 16, 512)
+        >>> context = torch.randn(32, 8, 256)
+        >>> out = cross_attn(query, context)  # (32, 16, 512)
     """
 
     def __init__(
         self,
         query_dim: int,
         context_dim=None,
-        heads=8,
-        dim_head=64,
+        n_heads=8,
+        head_dim=64,
         dropout=0.0,
-        attn_op: Optional[BaseAttentionOp] = None,
-        qkv_bias: bool = False,
-        out_bias: bool = False,
-        qkv_norm: str = "SSI",
-        qkv_norm_mode: str = "per_head",
-        backend: str = "transformer_engine",
         qkv_format: str = "bshd",
+        backend: str = "transformer_engine",
     ) -> None:
         super().__init__()
-
         self.is_selfattn = context_dim is None  # self attention
 
-        inner_dim = dim_head * heads
-        context_dim = query_dim if context_dim is None else context_dim
-
-        self.heads = heads
-        self.dim_head = dim_head
-        self.qkv_norm_mode = qkv_norm_mode
-        self.qkv_format = qkv_format
-
-        if self.qkv_norm_mode == "per_head":
-            norm_dim = dim_head
-        else:
-            raise ValueError(f"Normalization mode {self.qkv_norm_mode} not found, only support 'per_head'")
-
+        assert backend in ["transformer_engine", "torch"], f"Invalid backend: {backend}"
         self.backend = backend
-        self.tp_size = 1  # TP is not included in this Attention implementation.
 
-        self.to_q = nn.Sequential(
-            nn.Linear(query_dim, inner_dim, bias=qkv_bias),
-            get_normalization(qkv_norm[0], norm_dim),
-        )
-        self.to_k = nn.Sequential(
-            nn.Linear(context_dim, inner_dim, bias=qkv_bias),
-            get_normalization(qkv_norm[1], norm_dim),
-        )
-        self.to_v = nn.Sequential(
-            nn.Linear(context_dim, inner_dim, bias=qkv_bias),
-            get_normalization(qkv_norm[2], norm_dim),
-        )
+        context_dim = query_dim if context_dim is None else context_dim
+        inner_dim = head_dim * n_heads
 
-        self.to_out = nn.Sequential(
-            nn.Linear(inner_dim, query_dim, bias=out_bias),
-            nn.Dropout(dropout),
-        )
+        self.n_heads = n_heads
+        self.head_dim = head_dim
+        self.qkv_format = qkv_format
+        self.query_dim = query_dim
+        self.context_dim = context_dim
 
-        if attn_op:  # use what is given
-            self.attn_op = attn_op
-        elif self.backend == "transformer_engine":
-            self.attn_op: BaseAttentionOp = DotProductAttention(
-                self.heads,
-                self.dim_head,
-                num_gqa_groups=self.heads,
+        self.q_proj = nn.Linear(query_dim, inner_dim, bias=False)
+        self.q_norm = te.pytorch.RMSNorm(self.head_dim, eps=1e-6)
+
+        self.k_proj = nn.Linear(context_dim, inner_dim, bias=False)
+        self.k_norm = te.pytorch.RMSNorm(self.head_dim, eps=1e-6)
+
+        self.v_proj = nn.Linear(context_dim, inner_dim, bias=False)
+        self.v_norm = nn.Identity()
+
+        self.output_proj = nn.Linear(inner_dim, query_dim, bias=False)
+        self.output_dropout = nn.Dropout(dropout) if dropout > 1e-4 else nn.Identity()
+
+        if self.backend == "transformer_engine":
+            self.attn_op = DotProductAttention(
+                self.n_heads,
+                self.head_dim,
+                num_gqa_groups=self.n_heads,
                 attention_dropout=0,
                 qkv_format=qkv_format,
                 attn_mask_type="no_mask",
-                tp_size=self.tp_size,
-                tp_group=None,
-                sequence_parallel=False,
             )
         elif self.backend == "torch":
-            self.attn_op = torch.nn.functional.scaled_dot_product_attention
-        else:
-            raise ValueError(f"Backend {backend} not found")
+            self.attn_op = torch_attention_op
 
-    def cal_qkv(
-        self, x, context=None, mask=None, rope_emb=None, **kwargs
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        del kwargs
+        self._query_dim = query_dim
+        self._context_dim = context_dim
+        self._inner_dim = inner_dim
+        self.init_weights()
 
-        """
-        self.to_q, self.to_k, self.to_v are nn.Sequential with projection + normalization layers.
-        Before 07/24/2024, these modules normalize across all heads.
-        After 07/24/2024, to support tensor parallelism and follow the common practice in the community,
-        we support to normalize per head.
-        To keep the checkpoint copatibility with the previous code,
-        we keep the nn.Sequential but call the projection and the normalization layers separately.
-        We use a flag `self.qkv_norm_mode` to control the normalization behavior.
-        The default value of `self.qkv_norm_mode` is "per_head", which means we normalize per head.
-        """
-        if self.qkv_norm_mode == "per_head":
-            q = self.to_q[0](x)
-            context = x if context is None else context
-            k = self.to_k[0](context)
-            v = self.to_v[0](context)
-            q, k, v = map(
-                lambda t: rearrange(t, "b ... (n c) -> b ... n c", n=self.heads, c=self.dim_head),
-                (q, k, v),
-            )
-        else:
-            raise ValueError(f"Normalization mode {self.qkv_norm_mode} not found, only support 'per_head'")
+    def init_weights(self) -> None:
+        std = 1.0 / math.sqrt(self._query_dim)
+        torch.nn.init.trunc_normal_(self.q_proj.weight, std=std, a=-3 * std, b=3 * std)
+        std = 1.0 / math.sqrt(self._context_dim)
+        torch.nn.init.trunc_normal_(self.k_proj.weight, std=std, a=-3 * std, b=3 * std)
+        torch.nn.init.trunc_normal_(self.v_proj.weight, std=std, a=-3 * std, b=3 * std)
 
-        q = self.to_q[1](q)
-        k = self.to_k[1](k)
-        v = self.to_v[1](v)
-        if self.is_selfattn and rope_emb is not None:  # only apply to self-attention!
-            q = apply_rotary_pos_emb(q, rope_emb, tensor_format=self.qkv_format, fused=True)
-            k = apply_rotary_pos_emb(k, rope_emb, tensor_format=self.qkv_format, fused=True)
+        std = 1.0 / math.sqrt(self._inner_dim)
+        torch.nn.init.trunc_normal_(self.output_proj.weight, std=std, a=-3 * std, b=3 * std)
+
+        for layer in self.q_norm, self.k_norm, self.v_norm:
+            if hasattr(layer, "reset_parameters"):
+                layer.reset_parameters()
+
+    def compute_qkv(self, x, context=None, rope_emb=None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        q = self.q_proj(x)
+        context = x if context is None else context
+        k = self.k_proj(context)
+        v = self.v_proj(context)
+        q, k, v = map(
+            lambda t: rearrange(t, "b ... (h d) -> b ... h d", h=self.n_heads, d=self.head_dim),
+            (q, k, v),
+        )
+
+        def apply_norm_and_rotary_pos_emb(q, k, v, rope_emb):
+            q = self.q_norm(q)
+            k = self.k_norm(k)
+            v = self.v_norm(v)
+            if self.is_selfattn and rope_emb is not None:  # only apply to self-attention!
+                q = apply_rotary_pos_emb(q, rope_emb, tensor_format=self.qkv_format, fused=True)
+                k = apply_rotary_pos_emb(k, rope_emb, tensor_format=self.qkv_format, fused=True)
+            return q, k, v
+
+        q, k, v = checkpoint(apply_norm_and_rotary_pos_emb, q, k, v, rope_emb, use_reentrant=False)
+
         return q, k, v
 
-    def cal_attn(self, q, k, v, mask=None):
-        if self.backend == "transformer_engine":
-            seq_dim = self.qkv_format.index("s")
-            assert (
-                q.shape[seq_dim] > 1 and k.shape[seq_dim] > 1
-            ), "Seqlen must be larger than 1 for TE Attention starting with 1.8 TE version."
-            out = self.attn_op(q, k, v, core_attention_bias_type="no_bias", core_attention_bias=None)  # [B, Mq, H, V]
-            return self.to_out(out)
-        elif self.backend == "torch":
-            q = rearrange(q, "s b h d -> b h s d")
-            k = rearrange(k, "s b h d -> b h s d")
-            v = rearrange(v, "s b h d -> b h s d")
-            out = self.attn_op(q, k, v)  # [B, Mq, H, V]
-            return self.to_out(rearrange(out, " b h s d -> s b (h d)"))
-        else:
-            raise ValueError(f"Backend {self.backend} not found")
+    def compute_attention(self, q, k, v):
+        result = self.attn_op(q, k, v)  # [B, S, H, D]
+        return self.output_dropout(self.output_proj(result))
 
     def forward(
         self,
         x,
         context=None,
-        mask=None,
         rope_emb=None,
-        **kwargs,
     ):
         """
         Args:
             x (Tensor): The query tensor of shape [B, Mq, K]
             context (Optional[Tensor]): The key tensor of shape [B, Mk, K] or use x as context [self attention] if None
         """
-        q, k, v = self.cal_qkv(x, context, mask, rope_emb=rope_emb, **kwargs)
-        return self.cal_attn(q, k, v, mask)
+        q, k, v = self.compute_qkv(x, context, rope_emb=rope_emb)
+        return self.compute_attention(q, k, v)
+
+    def set_context_parallel_group(self, process_group, ranks, stream):
+        self.attn_op.set_context_parallel_group(process_group, ranks, stream)
