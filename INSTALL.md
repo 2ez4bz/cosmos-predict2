@@ -30,28 +30,3 @@ You can test the environment setup for inference with
 ```bash
 CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python scripts/test_environment.py
 ```
-
-### Post-training
-
-The below commands creates the `cosmos-predict2` conda environment and installs the dependencies for post-training. This is the same as required for inference but with an additional package `apex` for training with bfloat16.
-```bash
-# Create the cosmos-predict2 conda environment.
-conda env create --file cosmos-predict2.yaml
-# Activate the cosmos-predict2 conda environment.
-conda activate cosmos-predict2
-# Install the dependencies.
-pip install -r requirements.txt
-# Patch Transformer engine linking issues in conda environments.
-ln -sf $CONDA_PREFIX/lib/python3.10/site-packages/nvidia/*/include/* $CONDA_PREFIX/include/
-ln -sf $CONDA_PREFIX/lib/python3.10/site-packages/nvidia/*/include/* $CONDA_PREFIX/include/python3.10
-# Install Transformer engine.
-pip install transformer-engine[pytorch]==1.12.0
-# Install Apex for full training with bfloat16.
-git clone https://github.com/NVIDIA/apex
-CUDA_HOME=$CONDA_PREFIX pip install -v --disable-pip-version-check --no-cache-dir --no-build-isolation --config-settings "--build-option=--cpp_ext" --config-settings "--build-option=--cuda_ext" ./apex
-```
-
-You can test the environment setup for post-training with
-```bash
-CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python scripts/test_environment.py --training
-```
