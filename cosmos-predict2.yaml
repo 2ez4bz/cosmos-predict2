@@ -1,5 +1,5 @@
-# conda env create --file cosmos-predict1.yaml
-name: cosmos-predict1
+# conda env create --file cosmos-predict2.yaml
+name: cosmos-predict2
 channels:
   - conda-forge
 dependencies:

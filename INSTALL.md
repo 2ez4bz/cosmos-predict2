@@ -1,9 +1,9 @@
 ## Environment setup
 
-Clone the `cosmos-predict1` source code
+Clone the `cosmos-predict2` source code
 ```bash
-git clone git@github.com:nvidia-cosmos/cosmos-predict1.git
-cd cosmos-predict1
+git clone git@github.com:nvidia-cosmos/cosmos-predict2.git
+cd cosmos-predict2
 ```
 
 Cosmos runs only on Linux systems. We have tested the installation with Ubuntu 24.04, 22.04, and 20.04.
@@ -11,12 +11,12 @@ Cosmos requires the Python version to be `3.10.x`. Please also make sure you hav
 
 ### Inference
 
-The below commands creates the `cosmos-predict1` conda environment and installs the dependencies for inference:
+The below commands creates the `cosmos-predict2` conda environment and installs the dependencies for inference:
 ```bash
-# Create the cosmos-predict1 conda environment.
-conda env create --file cosmos-predict1.yaml
-# Activate the cosmos-predict1 conda environment.
-conda activate cosmos-predict1
+# Create the cosmos-predict2 conda environment.
+conda env create --file cosmos-predict2.yaml
+# Activate the cosmos-predict2 conda environment.
+conda activate cosmos-predict2
 # Install the dependencies.
 pip install -r requirements.txt
 # Patch Transformer engine linking issues in conda environments.
@@ -33,12 +33,12 @@ CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python scripts/test_environment.py
 
 ### Post-training
 
-The below commands creates the `cosmos-predict1` conda environment and installs the dependencies for post-training. This is the same as required for inference but with an additional package `apex` for training with bfloat16.
+The below commands creates the `cosmos-predict2` conda environment and installs the dependencies for post-training. This is the same as required for inference but with an additional package `apex` for training with bfloat16.
 ```bash
-# Create the cosmos-predict1 conda environment.
-conda env create --file cosmos-predict1.yaml
-# Activate the cosmos-predict1 conda environment.
-conda activate cosmos-predict1
+# Create the cosmos-predict2 conda environment.
+conda env create --file cosmos-predict2.yaml
+# Activate the cosmos-predict2 conda environment.
+conda activate cosmos-predict2
 # Install the dependencies.
 pip install -r requirements.txt
 # Patch Transformer engine linking issues in conda environments.
