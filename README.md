@@ -22,39 +22,18 @@ See below for quickstart installation and usage examples. For comprehensive guid
 ### Install
 Please refer to [INSTALL.md](./INSTALL.md) for general instructions on environment setup.
 
-<details open>
-  <summary>Install</summary>
-
-### Environment setup
-
-Clone the `cosmos-predict2` source code
-```bash
-git clone git@github.com:nvidia-cosmos/cosmos-predict2.git
-cd cosmos-predict2
-```
-
-Cosmos runs only on Linux systems. We have tested the installation with Ubuntu 24.04, 22.04, and 20.04.
-Cosmos requires the Python version to be `3.10.x`. Please also make sure you have `conda` installed ([instructions](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html)).
-
-#### Inference
-
-The below commands creates the `cosmos-predict2` conda environment and installs the dependencies for inference:
-
-#### Post-training
-
-</details>
+### Inference with pre-trained Cosmos-Predict2 models
+* [Inference with diffusion-based Text2Image models](/examples/inference_diffusion_text2image.md) **[with multi-GPU support]**
+* [Inference with diffusion-based Video2World models](/examples/inference_diffusion_video2world.md) **[with multi-GPU support]**
 
 ## Models
 
 Cosmos-Predict2 include the following models
 
-* [Cosmos-Predict2-2B-Text2World](): Text to visual world generation
-* [Cosmos-Predict2-14B-Text2World](): Text to visual world generation
-* [Cosmos-Predict2-2B-Video2World](): Video + Text based future visual world generation
-* [Cosmos-Predict2-14B-Video2World](): Video + Text based future visual world generation
-
-### Inference with pre-trained Cosmos-Predict2 models
-* [Inference with diffusion-based Text2World models](/examples/inference_diffusion_text2world.md) 
+* [Cosmos-Predict2-2B-Text2Image](https://huggingface.co/nvidia/Cosmos-Predict2-2B-Text2Image): Text to image generation
+* [Cosmos-Predict2-14B-Text2Image](https://huggingface.co/nvidia/Cosmos-Predict2-14B-Text2Image): Text to image generation
+* [Cosmos-Predict2-2B-Video2World](https://huggingface.co/nvidia/Cosmos-Predict2-2B-Video2World): Video + Text based future visual world generation
+* [Cosmos-Predict2-14B-Video2World](https://huggingface.co/nvidia/Cosmos-Predict2-14B-Video2World): Video + Text based future visual world generation
 
 ## Contribute
 
