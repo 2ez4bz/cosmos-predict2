@@ -13,11 +13,10 @@ Cosmos-Predict2 is a key branch of Cosmos World Foundation Models (WFMs) special
 ## Key Features
 Cosmos-Predict2 includes the following:
 
-- **Diffusion-based world foundation models** for Text2World and Video2World generation, where a user can generate visual simulation based on text prompts and video prompts.
-- **Post-training scripts** for helping Physical AI builders post-train pre-trained Cosmos-Predict2 for their applications.
+- **Diffusion-based world foundation models** for Text2Image and Video2World generation, where a user can generate visual simulation based on text prompts and video prompts.
 
 ## Documentation
-See below for quickstart installation and usage examples. For comprehensive guidance on run inference and post-training, refer to our []
+See below for quickstart installation and usage examples. 
 
 ### Install
 Please refer to [INSTALL.md](./INSTALL.md) for general instructions on environment setup.
