@@ -4,87 +4,63 @@
 
 ### [Product Website](https://www.nvidia.com/en-us/ai/cosmos/) | [Hugging Face](https://huggingface.co/collections/nvidia/cosmos-predict1-67c9d1b97678dbf7669c89a7) | [Paper](https://arxiv.org/abs/2501.03575) | [Paper Website](https://research.nvidia.com/labs/dir/cosmos-predict1)
 
-Cosmos-Predict1 is a key branch of Cosmos World Foundation Models (WFMs) specialized for future state prediction, often referred to as world models. The tree main branches of Cosmos WFMs are [cosmos-predict](https://github.com/nvidia-cosmos/cosmos-predict1), [cosmos-transfer](https://github.com/nvidia-cosmos/cosmos-transfer1), and [cosmos-reason](https://github.com/nvidia-cosmos/cosmos-reason1). We visualize the architecture of Cosmos-Predict1 in the following figure.
+Cosmos-Predict2 is a key branch of Cosmos World Foundation Models (WFMs) specialized for future state prediction, often referred to as world models. The tree main branches of Cosmos WFMs are [cosmos-predict](https://github.com/nvidia-cosmos/cosmos-predict2), [cosmos-transfer](https://github.com/nvidia-cosmos/cosmos-transfer1), and [cosmos-reason](https://github.com/nvidia-cosmos/cosmos-reason1). We visualize the architecture of Cosmos-Predict2 in the following figure.
 
 <p align="center">
     <img src="assets/predict1_diagram.png" alt="Cosmos-Predict1 Architecture Diagram">
 </p>
 
-
-Cosmos-Predict1 includes the following:
+## Key Features
+Cosmos-Predict2 includes the following:
 
 - **Diffusion-based world foundation models** for Text2World and Video2World generation, where a user can generate visual simulation based on text prompts and video prompts.
-- **Autoregressive-based world foundation models** for Video2World generation, where a user can generate visual simulation based on video prompts and optional text prompts.
-- **Image and video tokenizers** for tokenizing videos into continuous tokens (latent vectors) and discrete tokens (integers) efficiently and effectively.
-- **Post-training scripts** for helping Physical AI builders post-train pre-trained Cosmos-Predict1 for their applications.
+- **Post-training scripts** for helping Physical AI builders post-train pre-trained Cosmos-Predict2 for their applications.
 
-## Example Model Behavior
+## Documentation
+See below for quickstart installation and usage examples. For comprehensive guidance on run inference and post-training, refer to our []
 
- [Cosmos-Predict Text2World](https://github.com/nvidia-cosmos/cosmos-predict1)
+### Install
+Please refer to [INSTALL.md](./INSTALL.md) for general instructions on environment setup.
 
-<video src="https://github.com/user-attachments/assets/8abcc5d0-0840-47ae-8f95-10fc0dae7092"> Your browser does not support the video tag.</video>
+<details open>
+  <summary>Install</summary>
 
-[Cosmos-Predict Video2World](https://github.com/nvidia-cosmos/cosmos-predict1)
+### Environment setup
 
-<video src="https://github.com/user-attachments/assets/d598af27-55de-4bc9-b68e-24b70876be9f"> Your browser does not support the video tag. </video>
+Clone the `cosmos-predict2` source code
+```bash
+git clone git@github.com:nvidia-cosmos/cosmos-predict2.git
+cd cosmos-predict2
+```
 
-## Getting Started
+Cosmos runs only on Linux systems. We have tested the installation with Ubuntu 24.04, 22.04, and 20.04.
+Cosmos requires the Python version to be `3.10.x`. Please also make sure you have `conda` installed ([instructions](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html)).
 
-We provide a comphrehensive set of examples to illustrate how to perform inference, post-training, etc, with Cosmos-Predict1. Click a relevant example below and start your Cosmos journey.
+#### Inference
 
-### Installation
+The below commands creates the `cosmos-predict2` conda environment and installs the dependencies for inference:
 
-Please refer to [INSTALL.md](INSTALL.md) for general instructions on environment setup.
+#### Post-training
 
-### Inference with pre-trained Cosmos-Predict1 models
-* [Inference with diffusion-based Text2World models](/examples/inference_diffusion_text2world.md) **[with multi-GPU support]**
-* [Inference with diffusion-based Video2World models](/examples/inference_diffusion_video2world.md) **[with multi-GPU support]**
-* [Inference with autoregressive-based base models](/examples/inference_autoregressive_base.md) **[with multi-GPU support]**
-* [Inference with autoregressive-based Video2World models](/examples/inference_autoregressive_video2world.md) **[with multi-GPU support]**
-* [Inference with tokenizer models](/examples/inference_tokenizer.md)
+</details>
 
-### Post-train pre-trained Cosmos-Predict1 models
-* [Post-train diffusion-based Text2World models using custom datasets](/examples/post-training_diffusion_text2world.md) **[with multi-node support]**
-* [Post-train diffusion-based Video2World models using custom datasets](/examples/post-training_diffusion_video2world.md) **[with multi-node support]**
-* [Post-train diffusion-based Text2World models using custom multi-view datasets](/examples/post-training_diffusion_text2world_multiview.md) **[with multi-node support]**
-* [Post-train diffusion-based Video2World models using custom multi-view datasets)](/examples/post-training_diffusion_video2world_multiview.md) **[with multi-node support]**
-* [Post-train autoregressive-based base models using custom datasets](/examples/post-training_autoregressive_base.md) **[with multi-node support]**
-* [Post-train tokenizers using custom datasets](/examples/post-training_tokenizer.md) **[with multi-node support]**
+## Models
 
-### Inference with post-trained models:
-* [Inference with post-trained multi-view diffusion-based Text2World models)](/examples/inference_diffusion_text2world_multiview.md) **[with multi-GPU support]**
-* [Inference with post-trained multi-view diffusion-based Video2World models)](/examples/inference_diffusion_video2world_multiview.md) **[with multi-GPU support]**
+Cosmos-Predict2 include the following models
 
+* [Cosmos-Predict2-2B-Text2World](): Text to visual world generation
+* [Cosmos-Predict2-14B-Text2World](): Text to visual world generation
+* [Cosmos-Predict2-2B-Video2World](): Video + Text based future visual world generation
+* [Cosmos-Predict2-14B-Video2World](): Video + Text based future visual world generation
 
-## Cosmos-Predict1 Models
+### Inference with pre-trained Cosmos-Predict2 models
+* [Inference with diffusion-based Text2World models](/examples/inference_diffusion_text2world.md) 
 
-Cosmos-Predict1 include the following models
+## Contribute
 
-**Diffusion models**
+We thrive on community collaboration! [NVIDIA-Cosmos](https://github.com/nvidia-cosmos/) wouldn’t be where it is without contributions from developers like you. Check out our Contributing Guide to get started, and share your feedback through issues.
 
-* [Cosmos-Predict1-7B-Text2World](https://huggingface.co/nvidia/Cosmos-Predict1-7B-Text2World): Text to visual world generation
-* [Cosmos-Predict1-14B-Text2World](https://huggingface.co/nvidia/Cosmos-Predict1-14B-Text2World): Text to visual world generation
-* [Cosmos-Predict1-7B-Video2World](https://huggingface.co/nvidia/Cosmos-Predict1-7B-Video2World): Video + Text based future visual world generation
-* [Cosmos-Predict1-14B-Video2World](https://huggingface.co/nvidia/Cosmos-Predict1-14B-Video2World): Video + Text based future visual world generation
-
-**Autoregressive models**
-
-* [Cosmos-Predict1-4B](https://huggingface.co/nvidia/Cosmos-Predict1-4B): Future visual world generation
-* [Cosmos-Predict1-12B](https://huggingface.co/nvidia/Cosmos-Predict1-12B): Future visual world generation
-* [Cosmos-Predict1-5B-Video2World](https://huggingface.co/nvidia/Cosmos-Predict1-5B-Video2World): Video + Text based future visual world generation
-* [Cosmos-Predict1-13B-Video2World](https://huggingface.co/nvidia/Cosmos-Predict1-13B-Video2World): Video + Text based future visual world generation
-
-**Tokenizers**
-
-* [Cosmos-Tokenize1-CV8×8×8-720p](https://huggingface.co/nvidia/Cosmos-Tokenize1-CV8x8x8-720p): Continuous Video Tokenizer with 8x8x8 spatio-temporal compression with, 121 frames context
-* [Cosmos-Tokenize1-DV8×16×16-720p](https://huggingface.co/nvidia/Cosmos-Tokenize1-DV8x16x16-720p): Discrete Video Tokenizer with 8x16x16 spatio-temporal compression, and 49 frames context
-* [Cosmos-Tokenize1-CI8×8-360p](https://huggingface.co/nvidia/Cosmos-Tokenize1-CI8x8-360p): Continuous Image Tokenizer with 8x8 spatial compression with low-resolution support
-* [Cosmos-Tokenize1-CI16x16-360p](https://huggingface.co/nvidia/Cosmos-Tokenize1-CI16x16-360p): Continuous Image Tokenizer with 16x16 spatial compression with low-resolution support
-* [Cosmos-Tokenize1-CV4×8×8-360p](https://huggingface.co/nvidia/Cosmos-Tokenize1-CV4x8x8-360p): Continuous Video Tokenizer with 4x8x8 spatio-temporal compression with low-resolution support
-* [Cosmos-Tokenize1-DI8×8-360p](https://huggingface.co/nvidia/Cosmos-Tokenize1-DI8x8-360p): Discrete Image Tokenizer with 8x8 spatial compression with low-resolution support
-* [Cosmos-Tokenize1-DI16x16-360p](https://huggingface.co/nvidia/Cosmos-Tokenize1-DI16x16-360p): Discrete Image Tokenizer with 16x16 spatial compression with low-resolution support
-* [Cosmos-Tokenize1-DV4×8×8-360p](https://huggingface.co/nvidia/Cosmos-Tokenize1-DV4x8x8-360p): Discrete Video Tokenizer with 4x8x8 spatio-temporal compression with low-resolution support
-
+Big thanks 🙏 to everyone helping us push the boundaries of open-source physical AI!
 <!-- ------------------------------ -->
 
 ## License and Contact
