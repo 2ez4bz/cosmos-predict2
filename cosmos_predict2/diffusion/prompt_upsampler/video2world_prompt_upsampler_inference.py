@@ -26,37 +26,40 @@ from math import ceil
 
 from PIL import Image
 
-from cosmos_predict2.autoregressive.configs.base.model_config import create_vision_language_model_config
-from cosmos_predict2.autoregressive.model import AutoRegressiveModel
+# from cosmos_predict2.autoregressive.configs.base.model_config import create_vision_language_model_config
+# from cosmos_predict2.autoregressive.model import AutoRegressiveModel
 from cosmos_predict2.auxiliary.guardrail.common import presets as guardrail_presets
-from cosmos_predict2.diffusion.prompt_upsampler.inference import chat_completion
+
+# from cosmos_predict2.diffusion.prompt_upsampler.inference import chat_completion
 from cosmos_predict2.utils import log
 from cosmos_predict2.utils.io import load_from_fileobj
 
 
-def create_vlm_prompt_upsampler(
-    checkpoint_dir: str, tokenizer_ckpt_path: str = "mistral-community/pixtral-12b"
-) -> AutoRegressiveModel:
-    """
-    Load the fine-tuned pixtral model for SimReady.
-    If pixtral_ckpt is not provided, use the pretrained checkpoint.
-    """
-    model_ckpt_path = os.path.join(checkpoint_dir, "model.pt")
-    model_config, tokenizer_config = create_vision_language_model_config(
-        model_ckpt_path=model_ckpt_path,
-        tokenizer_ckpt_path=tokenizer_ckpt_path,
-        model_family="pixtral",
-        model_size="12b",
-        is_instruct_model=True,
-        max_batch_size=1,
-        max_seq_len=4300,
-        pytorch_rope_version="v1",
-    )
-    # during instantiate, the weights will be downloaded (if not already cached) and loaded
-    return AutoRegressiveModel.build(
-        model_config=model_config,
-        tokenizer_config=tokenizer_config,
-    ).to("cuda")
+def create_vlm_prompt_upsampler():
+    # def create_vlm_prompt_upsampler(
+    #     checkpoint_dir: str, tokenizer_ckpt_path: str = "mistral-community/pixtral-12b"
+    # ) -> AutoRegressiveModel:
+    #     """
+    #     Load the fine-tuned pixtral model for SimReady.
+    #     If pixtral_ckpt is not provided, use the pretrained checkpoint.
+    #     """
+    #     model_ckpt_path = os.path.join(checkpoint_dir, "model.pt")
+    #     model_config, tokenizer_config = create_vision_language_model_config(
+    #         model_ckpt_path=model_ckpt_path,
+    #         tokenizer_ckpt_path=tokenizer_ckpt_path,
+    #         model_family="pixtral",
+    #         model_size="12b",
+    #         is_instruct_model=True,
+    #         max_batch_size=1,
+    #         max_seq_len=4300,
+    #         pytorch_rope_version="v1",
+    #     )
+    #     # during instantiate, the weights will be downloaded (if not already cached) and loaded
+    #     return AutoRegressiveModel.build(
+    #         model_config=model_config,
+    #         tokenizer_config=tokenizer_config,
+    #     ).to("cuda")
+    pass
 
 
 def resize_image(image: Image.Image, max_size: int = 1024) -> Image.Image:
@@ -94,24 +97,27 @@ Focus only on the content, no filler words or descriptions on the style. Never m
     ]
 
 
-def run_chat_completion(pixtral: AutoRegressiveModel, dialog: list[dict], **inference_args) -> str:
-    default_args = {
-        "max_gen_len": 400,
-        "temperature": 0,
-        "top_p": 0.9,
-        "logprobs": False,
-        "compile_sampling": False,
-        "compile_prefill": False,
-    }
-    default_args.update(inference_args)
-    results = chat_completion(
-        pixtral,
-        [dialog],
-        **default_args,
-    )
-    assert len(results) == 1
-    upsampled_prompt = str(results[0]["generation"]["content"])
-    return upsampled_prompt
+# def run_chat_completion(pixtral: AutoRegressiveModel, dialog: list[dict], **inference_args) -> str:
+def run_chat_completion(pixtral: None, dialog: list[dict], **inference_args) -> str:
+    # default_args = {
+    #     "max_gen_len": 400,
+    #     "temperature": 0,
+    #     "top_p": 0.9,
+    #     "logprobs": False,
+    #     "compile_sampling": False,
+    #     "compile_prefill": False,
+    # }
+    # default_args.update(inference_args)
+    # results = chat_completion(
+    #     pixtral,
+    #     [dialog],
+    #     **default_args,
+    # )
+    # assert len(results) == 1
+    # upsampled_prompt = str(results[0]["generation"]["content"])
+    # return upsampled_prompt
+
+    pass
 
 
 def parse_args():

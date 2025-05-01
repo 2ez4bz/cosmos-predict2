@@ -90,6 +90,18 @@ def add_common_arguments(parser):
         help="Output folder for generating a batch of videos",
     )
     parser.add_argument(
+        "--image_save_name",
+        type=str,
+        default="output",
+        help="Output filename for generating a single image",
+    )
+    parser.add_argument(
+        "--image_save_folder",
+        type=str,
+        default="outputs/",
+        help="Output folder for generating a batch of images",
+    )
+    parser.add_argument(
         "--prompt",
         type=str,
         help="Text prompt for generating a single video",
@@ -172,14 +184,14 @@ def remove_argument(parser, arg_name):
 
 
 def validate_args(args: argparse.Namespace, inference_type: str) -> None:
-    """Validate command line arguments for text2world and video2world generation."""
+    """Validate command line arguments for text2image and video2world generation."""
     assert inference_type in [
-        "text2world",
+        "text2image",
         "video2world",
-    ], "Invalid inference_type, must be 'text2world' or 'video2world'"
+    ], "Invalid inference_type, must be 'text2image or 'video2world'"
 
     # Validate prompt/image/video args for single or batch generation
-    if inference_type == "text2world" or (inference_type == "video2world" and args.disable_prompt_upsampler):
+    if inference_type == "text2image" or (inference_type == "video2world" and args.disable_prompt_upsampler):
         assert args.prompt or args.batch_input_path, "--prompt or --batch_input_path must be provided."
     if inference_type == "video2world" and not args.batch_input_path:
         assert (

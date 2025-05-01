@@ -15,20 +15,19 @@
 
 from hydra.core.config_store import ConfigStore
 
-from cosmos_predict2.utils.lazy_config import LazyCall as L
 from cosmos_predict2.utils.lazy_config import LazyDict
 
-cosmos_predict2_Text2World_7B_Multiview: LazyDict = LazyDict(
+Cosmos_Predict2_2B_Text2Image: LazyDict = LazyDict(
     dict(
         defaults=[
-            "/experiment/cosmos_predict2_Text2World_7B",
-            {"override /net": "faditv2_multiview_7b"},
-            {"override /conditioner": "add_fps_image_size_padding_mask_frame_repeat"},
+            {"override /net": "cosmos_predict2_net_2b"},
+            {"override /conditioner": "add_fps_padding_mask"},
+            {"override /tokenizer": "wan2pt1_tokenizer"},
             "_self_",
         ],
         job=dict(
-            group="Text2World",
-            name="cosmos_predict2_Text2World_7B_Multiview",
+            group="Text2Image",
+            name="Cosmos_Predict2_2B_Text2Image",
         ),
         model=dict(
             latent_shape=[
@@ -37,20 +36,38 @@ cosmos_predict2_Text2World_7B_Multiview: LazyDict = LazyDict(
                 88,
                 160,
             ],
-            tokenizer=dict(
-                video_vae=dict(
-                    pixel_chunk_duration=57,
-                )
-            ),
+        ),
+    )
+)
+
+Cosmos_Predict2_14B_Text2Image: LazyDict = LazyDict(
+    dict(
+        defaults=[
+            {"override /net": "cosmos_predict2_net_14b"},
+            {"override /conditioner": "add_fps_padding_mask"},
+            {"override /tokenizer": "wan2pt1_tokenizer"},
+            "_self_",
+        ],
+        job=dict(
+            group="Text2Image",
+            name="Cosmos_Predict2_14B_Text2Image",
+        ),
+        model=dict(
+            latent_shape=[
+                16,
+                16,
+                88,
+                160,
+            ],
         ),
     )
 )
 
 
 cs = ConfigStore.instance()
-cs.store(
-    group="experiment",
-    package="_global_",
-    name=cosmos_predict2_Text2World_7B_Multiview["job"]["name"],
-    node=cosmos_predict2_Text2World_7B_Multiview,
-)
+
+for _item in [
+    Cosmos_Predict2_2B_Text2Image,
+    Cosmos_Predict2_14B_Text2Image,
+]:
+    cs.store(group="experiment", package="_global_", name=_item["job"]["name"], node=_item)

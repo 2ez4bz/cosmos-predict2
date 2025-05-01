@@ -38,7 +38,21 @@ def read_prompts_from_file(prompt_file: str) -> List[Dict[str, str]]:
     return prompts
 
 
-def save_video(video, fps, H, W, video_save_quality, video_save_path):
+def save_image(image: np.ndarray, image_save_path: str, quality: int = 95):
+    """Save image to file.
+
+    Args:
+        image (np.ndarray): Image array [H,W,C]
+        image_save_path (str): Output image file path
+        quality (int): Image encoding quality (0-100)
+    """
+    image = np.clip(image, 0, 255).astype(np.uint8)
+    imageio.imwrite(image_save_path, image, format="JPEG", quality=quality)
+
+    return
+
+
+def save_video(video: np.ndarray, fps: int, H: int, W: int, video_save_quality: int, video_save_path: str):
     """Save video frames to file.
 
     Args:
