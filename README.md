@@ -21,10 +21,51 @@ Cosmos-Predict2 includes the following:
 ## Documentation
 See below for quickstart installation and usage examples. 
 
-### Installation
-Please refer to [INSTALL.md](./INSTALL.md) for general instructions on environment setup.
+### Install
+Clone the `cosmos-predict2` source code
+```bash
+git clone git@github.com:nvidia-cosmos/cosmos-predict2.git
+cd cosmos-predict2
+```
+
+> ℹ️ Cosmos runs only on Linux systems. We have tested the installation with Ubuntu 24.04, 22.04, and 20.04.
+> ℹ️ Cosmos requires the Python version to be `3.10.x`. Please also make sure you have `conda` installed ([instructions](https://docs.conda.io/projects/conda/en/latest/user-guide/install/index.html)).
+
+The below commands creates the `cosmos-predict2` conda environment and installs the dependencies for inference:
+```bash
+# Create the cosmos-predict2 conda environment.
+conda env create --file cosmos-predict2.yaml
+# Activate the cosmos-predict2 conda environment.
+conda activate cosmos-predict2
+# Install the dependencies.
+pip install -r requirements.txt
+# Patch Transformer engine linking issues in conda environments.
+ln -sf $CONDA_PREFIX/lib/python3.10/site-packages/nvidia/*/include/* $CONDA_PREFIX/include/
+ln -sf $CONDA_PREFIX/lib/python3.10/site-packages/nvidia/*/include/* $CONDA_PREFIX/include/python3.10
+# Install Transformer engine.
+pip install transformer-engine[pytorch]==1.12.0
+```
+
+You can test the environment setup for inference with
+```bash
+CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python scripts/test_environment.py
+```
 
 Upcoming: we are working on easier installations options including a packaged Docker image. If you have questions of feedback, please file an issue and we will follow up!
+
+### Download checkpoints
+1. Generate a [Hugging Face](https://huggingface.co/settings/tokens) access token (if you haven't done so already). Set the access token to `Read` permission (default is `Fine-grained`).
+
+2. Log in to Hugging Face with the access token:
+   ```bash
+   huggingface-cli login
+   ```
+3. Accept the [LlamaGuard-7b terms](https://huggingface.co/meta-llama/LlamaGuard-7b)
+
+4. Download the Cosmos model weights from [Hugging Face](https://huggingface.co/collections/nvidia/cosmos-predict1-67c9d1b97678dbf7669c89a7):
+   ```bash
+   CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python scripts/download_diffusion_checkpoints.py --model_sizes 2B 14B --model_types Text2Image --checkpoint_dir checkpoints
+   CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python scripts/download_diffusion_checkpoints.py --model_sizes 2B 14B --model_types Video2World --checkpoint_dir checkpoints
 
 ### Inference with pre-trained Cosmos-Predict2 models
 * [Inference with diffusion-based Text2Image models](/examples/inference_diffusion_text2image.md) **[with multi-GPU support]**
