@@ -4,7 +4,7 @@
 
 ### [Product Website](https://www.nvidia.com/en-us/ai/cosmos/) | [Hugging Face](https://huggingface.co/collections/nvidia/cosmos-predict1-67c9d1b97678dbf7669c89a7) | [Paper](https://arxiv.org/abs/2501.03575) | [Paper Website](https://research.nvidia.com/labs/dir/cosmos-predict1)
 
-Cosmos-Predict2 is a key branch of Cosmos World Foundation Models (WFMs) specialized for future state prediction, often referred to as world models. The tree main branches of Cosmos WFMs are [cosmos-predict](https://github.com/nvidia-cosmos/cosmos-predict2), [cosmos-transfer](https://github.com/nvidia-cosmos/cosmos-transfer1), and [cosmos-reason](https://github.com/nvidia-cosmos/cosmos-reason1). We visualize the architecture of Cosmos-Predict2 in the following figure.
+Cosmos-Predict2 is a key branch of Cosmos World Foundation Models (WFMs) specialized for future state prediction, often referred to as world models. The three main branches of Cosmos WFMs are [cosmos-predict](https://github.com/nvidia-cosmos/cosmos-predict2), [cosmos-transfer](https://github.com/nvidia-cosmos/cosmos-transfer1), and [cosmos-reason](https://github.com/nvidia-cosmos/cosmos-reason1). We visualize the architecture of Cosmos-Predict2 in the following figure.
 
 <p align="center">
     <img src="assets/predict1_diagram.png" alt="Cosmos-Predict1 Architecture Diagram">
@@ -13,13 +13,18 @@ Cosmos-Predict2 is a key branch of Cosmos World Foundation Models (WFMs) special
 ## Key Features
 Cosmos-Predict2 includes the following:
 
-- **Diffusion-based world foundation models** for Text2Image and Video2World generation, where a user can generate visual simulation based on text prompts and video prompts.
+- **Diffusion-based world foundation models** for Text2Image and Video2World generation, where a user can generate visual simulation based on text prompts or video prompts.
+
+## News
+- [2025/05] Initial release of Predict2! This is a major upgrade from Predict1. Please try it out and give us feedback. 
 
 ## Documentation
 See below for quickstart installation and usage examples. 
 
-### Install
+### Installation
 Please refer to [INSTALL.md](./INSTALL.md) for general instructions on environment setup.
+
+Upcoming: we are working on easier installations options including a packaged Docker image. If you have questions of feedback, please file an issue and we will follow up!
 
 ### Inference with pre-trained Cosmos-Predict2 models
 * [Inference with diffusion-based Text2Image models](/examples/inference_diffusion_text2image.md) **[with multi-GPU support]**
