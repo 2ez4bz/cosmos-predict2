@@ -14,9 +14,9 @@ Please refer to the Inference section of [INSTALL.md](/INSTALL.md#inference) for
    ```
 3. Accept the [LlamaGuard-7b terms](https://huggingface.co/meta-llama/LlamaGuard-7b)
 
-4. Download the Cosmos model weights from [Hugging Face](https://huggingface.co/collections/nvidia/cosmos-predict1-67c9d1b97678dbf7669c89a7):
+4. Download the Cosmos model weights from [Hugging Face](https://huggingface.co/collections/nvidia/cosmos-predict2-68028efc052239369a0f2959):
    ```bash
-   CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python scripts/download_diffusion_checkpoints.py --model_sizes 7B 14B --model_types Video2World --checkpoint_dir checkpoints
+   CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python scripts/download_diffusion_checkpoints.py --model_sizes 2B 14B --model_types Video2World --checkpoint_dir checkpoints
    ```
 
 ### GPU memory requirements
@@ -25,7 +25,7 @@ We report the maximum observed GPU memory usage during end-to-end inference. Add
 
 For GPUs with limited memory, we recommend fully offloading all models. For higher-end GPUs, users can select the most suitable offloading strategy considering the numbers provided below.
 
-| Offloading Strategy                                                              | Cosmos-Predict1-7B-Video2World | Cosmos-Predict1-14B-Video2World |
+<!-- | Offloading Strategy                                                              | Cosmos-Predict2-2B-Video2World | Cosmos-Predict2-14B-Video2World |
 |----------------------------------------------------------------------------------|---------|---------|
 | Offload prompt upsampler                                                         | 76.5 GB | > 80.0 GB |
 | Offload prompt upsampler & guardrails                                            | 59.9 GB | 73.3 GB |
@@ -33,37 +33,37 @@ For GPUs with limited memory, we recommend fully offloading all models. For high
 | Offload prompt upsampler & guardrails & T5 encoder & tokenizer                   | 41.1 GB | 54.5 GB |
 | Offload prompt upsampler & guardrails & T5 encoder & tokenizer & diffusion model | 27.3 GB | 39.0 GB |
 
-The numbers may vary depending on system specs and are for reference only.
+The numbers may vary depending on system specs and are for reference only. -->
 
 ### Examples
 
-There are two models available for diffusion world generation from text and image/video input: `Cosmos-Predict1-7B-Video2World` and `Cosmos-Predict1-14B-Video2World`.
+There are two models available for diffusion world generation from text and image/video input: `Cosmos-Predict2-2B-Video2World` and `Cosmos-Predict2-14B-Video2World`.
 
-The inference script is `cosmos_predict1/diffusion/inference/video2world.py`.
+The inference script is `cosmos_predict2/diffusion/inference/video2world.py`.
 It requires the input argument `--input_image_or_video_path` (image/video input); if the prompt upsampler is disabled, `--prompt` (text input) must also be provided.
 To see the complete list of available arguments, run
 ```bash
-CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict1/diffusion/inference/video2world.py --help
+CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/video2world.py --help
 ```
 
 #### Example 1: single generation
-This is the basic example for running inference on the 7B model with a single image. No text prompts are provided here.
+This is the basic example for running inference on the 2B model with a single image. No text prompts are provided here.
 ```bash
-CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict1/diffusion/inference/video2world.py \
+CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/video2world.py \
     --checkpoint_dir checkpoints \
-    --diffusion_transformer_dir Cosmos-Predict1-7B-Video2World \
+    --diffusion_transformer_dir Cosmos-Predict2-2B-Video2World \
     --input_image_or_video_path assets/diffusion/video2world_input0.jpg \
     --num_input_frames 1 \
     --offload_prompt_upsampler \
-    --video_save_name diffusion-video2world-7b
+    --video_save_name diffusion-video2world-2b
 ```
 
 #### Example 2: single generation on the 14B model with model offloading
 We run inference on the 14B model with offloading flags enabled. This is suitable for low-memory GPUs. Model offloading is also required for the 14B model to avoid OOM.
 ```bash
-CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict1/diffusion/inference/video2world.py \
+CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/video2world.py \
     --checkpoint_dir checkpoints \
-    --diffusion_transformer_dir Cosmos-Predict1-14B-Video2World \
+    --diffusion_transformer_dir Cosmos-Predict2-14B-Video2World \
     --input_image_or_video_path assets/diffusion/video2world_input0.jpg \
     --num_input_frames 1 \
     --offload_tokenizer \
@@ -78,14 +78,14 @@ CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict1/diffusion/infer
 This example runs parallelized inference on a single prompt using 8 GPUs.
 ```bash
 NUM_GPUS=8
-CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) torchrun --nproc_per_node=${NUM_GPUS} cosmos_predict1/diffusion/inference/video2world.py \
+CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) torchrun --nproc_per_node=${NUM_GPUS} cosmos_predict2/diffusion/inference/video2world.py \
     --num_gpus ${NUM_GPUS} \
     --checkpoint_dir checkpoints \
-    --diffusion_transformer_dir Cosmos-Predict1-7B-Video2World \
+    --diffusion_transformer_dir Cosmos-Predict2-2B-Video2World \
     --input_image_or_video_path assets/diffusion/video2world_input0.jpg \
     --num_input_frames 1 \
     --offload_prompt_upsampler \
-    --video_save_name diffusion-video2world-7b
+    --video_save_name diffusion-video2world-2b
 ```
 
 #### Example 4: batch generation
@@ -97,13 +97,13 @@ Each line in the JSONL file must contain a `visual_input` field:
 ```
 Inference command (with 9 input frames):
 ```bash
-CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict1/diffusion/inference/video2world.py \
+CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/video2world.py \
     --checkpoint_dir checkpoints \
-    --diffusion_transformer_dir Cosmos-Predict1-7B-Video2World \
+    --diffusion_transformer_dir Cosmos-Predict2-2B-Video2World \
     --batch_input_path assets/diffusion/batch_inputs/video2world_ps.jsonl \
     --num_input_frames 9 \
     --offload_prompt_upsampler \
-    --video_save_folder diffusion-video2world-7b-batch
+    --video_save_folder diffusion-video2world-2b-batch
 ```
 
 #### Example 5: batch generation without prompt upsampler
@@ -115,11 +115,11 @@ The prompt upsampler is disabled, and thus each line in the JSONL file will need
 ```
 Inference command (with 9 input frames):
 ```bash
-CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict1/diffusion/inference/video2world.py \
+CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/video2world.py \
     --checkpoint_dir checkpoints \
-    --diffusion_transformer_dir Cosmos-Predict1-7B-Video2World \
+    --diffusion_transformer_dir Cosmos-Predict2-2B-Video2World \
     --batch_input_path assets/diffusion/batch_inputs/video2world_wo_ps.jsonl \
     --num_input_frames 9 \
     --disable_prompt_upsampler \
-    --video_save_folder diffusion-video2world-7b-batch-wo-ps
+    --video_save_folder diffusion-video2world-2b-batch-wo-ps
 ```
