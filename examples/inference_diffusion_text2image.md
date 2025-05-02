@@ -48,82 +48,69 @@ CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/infer
 
 We will set the prompt with an environment variable first.
 ```bash
-PROMPT="A close-up shot captures a vibrant yellow scrubber vigorously working on a grimy plate, its bristles moving in circular motions to lift stubborn grease and food residue. \
-The dish, once covered in remnants of a hearty meal, gradually reveals its original glossy surface. \
-Suds form and bubble around the scrubber, creating a satisfying visual of cleanliness in progress. \
-The sound of scrubbing fills the air, accompanied by the gentle clinking of the dish against the sink. \
-As the scrubber continues its task, the dish transforms, gleaming under the bright kitchen lights, symbolizing the triumph of cleanliness over mess."
+PROMPT="A close-up shot captures a vibrant yellow scrubber vigorously working on a grimy plate, its bristles moving in circular motions to lift stubborn grease and food residue. The dish, once covered in remnants of a hearty meal, gradually reveals its original glossy surface. Suds form and bubble around the scrubber, creating a satisfying visual of cleanliness in progress. The sound of scrubbing fills the air, accompanied by the gentle clinking of the dish against the sink. As the scrubber continues its task, the dish transforms, gleaming under the bright kitchen lights, symbolizing the triumph of cleanliness over mess."
 
-NEGATIVE_PROMPT="The video captures a series of frames showing ugly scenes, static with no motion, motion blur, over-saturation, shaky footage, low resolution, grainy texture, pixelated images, poorly lit areas, underexposed and overexposed scenes, poor color balance, washed out colors, choppy sequences, jerky movements, low frame rate, artifacting, color banding, unnatural transitions, outdated special effects, fake elements, unconvincing visuals, poorly edited content, jump cuts, visual noise, and flickering. Overall, the video is of poor quality." --prompt="A close-up shot captures a vibrant yellow scrubber vigorously working on a grimy plate, its bristles moving in circular motions to lift stubborn grease and food residue. The dish, once covered in remnants of a hearty meal, gradually reveals its original glossy surface. Suds form and bubble around the scrubber, creating a satisfying visual of cleanliness in progress. The sound of scrubbing fills the air, accompanied by the gentle clinking of the dish against the sink. As the scrubber continues its task, the dish transforms, gleaming under the bright kitchen lights, symbolizing the triumph of cleanliness over mess."
+NEGATIVE_PROMPT="The video captures a series of frames showing ugly scenes, static with no motion, motion blur, over-saturation, shaky footage, low resolution, grainy texture, pixelated images, poorly lit areas, underexposed and overexposed scenes, poor color balance, washed out colors, choppy sequences, jerky movements, low frame rate, artifacting, color banding, unnatural transitions, outdated special effects, fake elements, unconvincing visuals, poorly edited content, jump cuts, visual noise, and flickering. Overall, the video is of poor quality."
 ```
 
 #### Example 1: single generation on the 2B model
 This is the basic example for running inference on the 2B model with a single prompt.
 ```bash
-# current code to deliver
-CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/text2world.py \
-    --checkpoint_dir checkpoints \
-    --diffusion_transformer_dir Cosmos-Predict2-14B-Text2World \
-    --offload_prompt_upsampler \
-    --disable_prompt_upsampler \
-    --disable_guardrail \
-    --prompt $PROMPT \
-    --negative_prompt $NEGATIVE_PROMPT \
-    --video_save_name text2world_14b
-
-# real example to deliver
 CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/text2image.py \
     --checkpoint_dir checkpoints \
     --diffusion_transformer_dir Cosmos-Predict2-2B-Text2Image \
     --offload_prompt_upsampler \
     --disable_prompt_upsampler \
     --disable_guardrail \
-    --prompt $PROMPT \
-    --negative_prompt $NEGATIVE_PROMPT \
-    --video_save_name text2image_2b
+    --prompt "${PROMPT}" \
+    --negative_prompt "${NEGATIVE_PROMPT}" \
+    --image_save_name text2image_2b
 ```
 
 #### Example 2: single generation on the 14B model
 <!-- We run inference on the 14B model with offloading flags enabled. This is suitable for low-memory GPUs. Model offloading is also required for the 14B model to avoid OOM. -->
 This is the basic example for running inference on the 14B model with a single prompt.
 ```bash
-
 CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/text2image.py \
     --checkpoint_dir checkpoints \
     --diffusion_transformer_dir Cosmos-Predict2-14B-Text2Image \
     --offload_prompt_upsampler \
     --disable_prompt_upsampler \
     --disable_guardrail \
-    --negative_prompt $NEGATIVE_PROMPT \
-    --video_save_name text2image_14b
-
-
-# CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/text2world.py \
-#     --checkpoint_dir checkpoints \
-#     --diffusion_transformer_dir Cosmos-Predict1-14B-Text2World \
-#     --prompt "${PROMPT}" \
-#     --offload_tokenizer \
-#     --offload_diffusion_transformer \
-#     --offload_text_encoder_model \
-#     --offload_prompt_upsampler \
-#     --offload_guardrail_models \
-#     --video_save_name diffusion-text2world-14b
+    --prompt "${PROMPT}" \
+    --negative_prompt "${NEGATIVE_PROMPT}" \
+    --image_save_name text2image_14b
 ```
 
-#### Example 3: single generation with multi-GPU inference
+<!-- #### Example 3: single generation with multi-GPU inference
 This example runs parallelized inference on a single prompt using 8 GPUs.
 ```bash
 NUM_GPUS=8
-CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) torchrun --nproc_per_node=${NUM_GPUS} cosmos_predict2/diffusion/inference/text2world.py \
-    --num_gpus ${NUM_GPUS} \
+CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) torchrun --nproc_per_node=${NUM_GPUS} cosmos_predict2/diffusion/inference/text2image.py \
     --checkpoint_dir checkpoints \
-    --diffusion_transformer_dir Cosmos-Predict2-2B-Text2World \
-    --prompt "${PROMPT}" \
+    --diffusion_transformer_dir Cosmos-Predict2-14B-Text2Image \
     --offload_prompt_upsampler \
-    --video_save_name diffusion-text2world-2b-8gpu
-```
+    --disable_prompt_upsampler \
+    --disable_guardrail \
+    --prompt "${PROMPT}" \
+    --negative_prompt "${NEGATIVE_PROMPT}" \
+    --image_save_name text2image_14b_8gpu
 
-#### Example 4: batch generation
+
+
+NUM_GPUS=8
+CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) torchrun --nproc_per_node=${NUM_GPUS} cosmos_predict2/diffusion/inference/text2image.py \
+    --checkpoint_dir checkpoints \
+    --diffusion_transformer_dir Cosmos-Predict2-2B-Text2Image \
+    --offload_prompt_upsampler \
+    --disable_prompt_upsampler \
+    --disable_guardrail \
+    --prompt "${PROMPT}" \
+    --negative_prompt "${NEGATIVE_PROMPT}" \
+    --image_save_name text2image_2b_8gpu
+``` -->
+
+<!-- #### Example 4: batch generation
 This example runs inference on a batch of prompts, provided through the `--batch_input_path` argument (path to a JSONL file).
 The JSONL file should contain one prompt per line in the following format, where each line must contain a `prompt` field:
 ```json
@@ -138,4 +125,4 @@ CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/infer
     --batch_input_path assets/diffusion/batch_inputs/text2world.jsonl \
     --offload_prompt_upsampler \
     --video_save_folder diffusion-text2world-2b-batch
-```
+``` -->
