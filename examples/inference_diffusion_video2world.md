@@ -19,13 +19,13 @@ Please refer to the Inference section of [INSTALL.md](/INSTALL.md#inference) for
    CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python scripts/download_diffusion_checkpoints.py --model_sizes 2B 14B --model_types Video2World --checkpoint_dir checkpoints
    ```
 
-### GPU memory requirements
+<!-- ### GPU memory requirements
 
 We report the maximum observed GPU memory usage during end-to-end inference. Additionally, we offer a series of model offloading strategies to help users manage GPU memory usage effectively.
 
 For GPUs with limited memory, we recommend fully offloading all models. For higher-end GPUs, users can select the most suitable offloading strategy considering the numbers provided below.
 
-<!-- | Offloading Strategy                                                              | Cosmos-Predict2-2B-Video2World | Cosmos-Predict2-14B-Video2World |
+| Offloading Strategy                                                              | Cosmos-Predict2-2B-Video2World | Cosmos-Predict2-14B-Video2World |
 |----------------------------------------------------------------------------------|---------|---------|
 | Offload prompt upsampler                                                         | 76.5 GB | > 80.0 GB |
 | Offload prompt upsampler & guardrails                                            | 59.9 GB | 73.3 GB |
@@ -46,8 +46,9 @@ To see the complete list of available arguments, run
 CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/video2world.py --help
 ```
 
-#### Example 1: single generation
-This is the basic example for running inference on the 2B model with a single image. No text prompts are provided here.
+We will set prompts with environment variables first.
+Please refer to example inputs in [assets/video2world/](/assets/video2world/).
+Below prompt is from [assets/video2world/input0.txt](/assets/video2world/input0.txt).
 ```bash
 PROMPT="A nighttime city bus terminal gradually shifts from stillness to subtle movement. At first, multiple double-decker buses are parked under the glow of overhead lights, with a central bus labeled “87D” facing forward and stationary. As the video progresses, the bus in the middle moves ahead slowly, its headlights brightening the surrounding area and casting reflections onto adjacent vehicles. The motion creates space in the lineup, signaling activity within the otherwise quiet station. It then comes to a smooth stop, resuming its position in line. Overhead signage in Chinese characters remains illuminated, enhancing the vibrant, urban night scene."
 

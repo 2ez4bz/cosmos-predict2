@@ -46,7 +46,9 @@ To see the complete list of available arguments, run
 CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/text2image.py --help
 ```
 
-We will set the prompt with an environment variable first.
+We will set prompts with environment variables first.
+Please refer to example inputs in [assets/text2image/](/assets/text2image/).
+Below prompt is from [assets/text2image/input0.txt](/assets/text2image/input0.txt).
 ```bash
 PROMPT="A close-up shot captures a vibrant yellow scrubber vigorously working on a grimy plate, its bristles moving in circular motions to lift stubborn grease and food residue. The dish, once covered in remnants of a hearty meal, gradually reveals its original glossy surface. Suds form and bubble around the scrubber, creating a satisfying visual of cleanliness in progress. The sound of scrubbing fills the air, accompanied by the gentle clinking of the dish against the sink. As the scrubber continues its task, the dish transforms, gleaming under the bright kitchen lights, symbolizing the triumph of cleanliness over mess."
 
