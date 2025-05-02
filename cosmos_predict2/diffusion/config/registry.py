@@ -25,9 +25,7 @@ from cosmos_predict2.diffusion.config.base.conditioner import (
 )
 from cosmos_predict2.diffusion.config.base.net import (
     FADITV2_14B_Config,
-    FADITV2_Multiview_Config,
     FADITV2Config,
-    COSMOS_PREDICT2_NET_14B_Config,
     COSMOS_PREDICT2_NET_2B_Config,
 )
 from cosmos_predict2.diffusion.config.base.tokenizer import (
@@ -48,18 +46,6 @@ def register_net(cs):
         package="model.net",
         name="faditv2_14b",
         node=FADITV2_14B_Config,
-    )
-    cs.store(
-        group="net",
-        package="model.net",
-        name="faditv2_multiview_7b",
-        node=FADITV2_Multiview_Config,
-    )
-    cs.store(
-        group="net",
-        package="model.net",
-        name="cosmos_predict2_net_14b",
-        node=COSMOS_PREDICT2_NET_14B_Config,
     )
     cs.store(
         group="net",

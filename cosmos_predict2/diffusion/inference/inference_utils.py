@@ -26,7 +26,6 @@ import torchvision.transforms.functional as transforms_F
 
 from cosmos_predict2.diffusion.model.model_t2w import DiffusionT2WModel
 from cosmos_predict2.diffusion.model.model_v2w import DiffusionV2WModel
-from cosmos_predict2.diffusion.model.model_v2w_multiview import DiffusionMultiviewV2WModel
 from cosmos_predict2.utils import log
 from cosmos_predict2.utils.config_helper import get_config_module, override
 from cosmos_predict2.utils.io import load_from_fileobj
@@ -759,46 +758,6 @@ def get_condition_latent(
     condition_latent = condition_latent.to(torch.bfloat16)
 
     return condition_latent
-
-
-def get_condition_latent_multiview(
-    model: DiffusionMultiviewV2WModel,
-    input_image_or_video_path: str,
-    num_input_frames: int = 1,
-    state_shape: list[int] = None,
-):
-    """Get condition latent from input image/video file. This is the function for the multi-view model where each view has one latent condition frame.
-
-    Args:
-        model (DiffusionMultiviewV2WModel): Video generation model
-        input_image_or_video_path (str): Path to conditioning image/video
-        num_input_frames (int): Number of input frames for video2world prediction
-
-    Returns:
-        tuple: (condition_latent, input_frames) where:
-            - condition_latent (torch.Tensor): Encoded latent condition [B,C,T,H,W]
-            - input_frames (torch.Tensor): Input frames tensor [B,C,T,H,W]
-    """
-    if state_shape is None:
-        state_shape = model.state_shape
-    assert num_input_frames > 0, "num_input_frames must be greater than 0"
-
-    H, W = (
-        state_shape[-2] * model.tokenizer.spatial_compression_factor,
-        state_shape[-1] * model.tokenizer.spatial_compression_factor,
-    )
-    input_path_format = input_image_or_video_path.split(".")[-1]
-    input_frames = read_video_or_image_into_frames_BCTHW(
-        input_image_or_video_path,
-        input_path_format=input_path_format,
-        H=H,
-        W=W,
-    )
-    input_frames = einops.rearrange(input_frames, "B C (V T) H W -> (B V) C T H W", V=model.n_views)
-    condition_latent, _ = create_condition_latent_from_input_frames(model, input_frames, num_input_frames)
-    condition_latent = condition_latent.to(torch.bfloat16)
-
-    return condition_latent, einops.rearrange(input_frames, "(B V) C T H W -> B C (V T) H W", V=model.n_views)[0]
 
 
 def check_input_frames(input_path: str, required_frames: int) -> bool:
