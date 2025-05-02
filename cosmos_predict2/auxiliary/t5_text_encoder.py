@@ -35,8 +35,8 @@ class CosmosT5TextEncoder(torch.nn.Module):
             device: The device to use for computations.
         """
         super().__init__()
-        self.tokenizer = T5TokenizerFast.from_pretrained(model_name, cache_dir=cache_dir)
-        self.text_encoder = T5EncoderModel.from_pretrained(model_name, cache_dir=cache_dir).to(device)
+        self.tokenizer = T5TokenizerFast.from_pretrained(cache_dir, cache_dir=cache_dir)
+        self.text_encoder = T5EncoderModel.from_pretrained(cache_dir, cache_dir=cache_dir).to(device)
         # try:
         #     self.tokenizer = T5TokenizerFast.from_pretrained(model_name, cache_dir=cache_dir)
         #     self.text_encoder = T5EncoderModel.from_pretrained(model_name, cache_dir=cache_dir).to(device)

@@ -160,7 +160,7 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
     def _load_tokenizer(self):
         load_tokenizer_model(
             self.model,
-            f"{self.checkpoint_dir}/Wan2pt1/Wan2.1_VAE.pth",
+            f"{self.checkpoint_dir}/Wan-AI/Wan2.1-T2V-1.3B/Wan2.1_VAE.pth",
             load_mean_std=self.load_mean_std,
             mean_std_path=f"{self.checkpoint_dir}/Wan2pt1/mean_std.pt",
         )
@@ -488,7 +488,7 @@ class DiffusionText2ImageGenerationPipeline(BaseWorldGenerationPipeline):
     def _load_tokenizer(self):
         load_tokenizer_model(
             self.model,
-            f"{self.checkpoint_dir}/Wan2pt1/Wan2.1_VAE.pth",
+            f"{self.checkpoint_dir}/Wan-AI/Wan2.1-T2V-1.3B/Wan2.1_VAE.pth",
             load_mean_std=self.load_mean_std,
             mean_std_path=f"{self.checkpoint_dir}/Wan2pt1/mean_std.pt",
         )
