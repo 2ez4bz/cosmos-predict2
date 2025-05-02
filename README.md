@@ -82,7 +82,7 @@ Cosmos-Predict2 include the following models
 
 ## Contribute
 
-We thrive on community collaboration! [NVIDIA-Cosmos](https://github.com/nvidia-cosmos/) wouldn’t be where it is without contributions from developers like you. Check out our Contributing Guide to get started, and share your feedback through issues.
+We thrive on community collaboration! [NVIDIA-Cosmos](https://github.com/nvidia-cosmos/) wouldn’t be where it is without contributions from developers like you. Check out our [Contributing Guide](CONTRIBUTING.md) to get started, and share your feedback through issues.
 
 Big thanks 🙏 to everyone helping us push the boundaries of open-source physical AI!
 <!-- ------------------------------ -->
