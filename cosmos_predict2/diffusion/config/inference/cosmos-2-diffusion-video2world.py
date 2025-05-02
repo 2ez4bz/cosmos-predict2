@@ -40,10 +40,34 @@ Cosmos_Predict2_2B_Video2World: LazyDict = LazyDict(
     )
 )
 
+Cosmos_Predict2_14B_Video2World: LazyDict = LazyDict(
+    dict(
+        defaults=[
+            {"override /net": "cosmos_predict2_net_14b"},
+            {"override /conditioner": "add_fps_padding_mask"},
+            {"override /tokenizer": "wan2pt1_tokenizer"},
+            "_self_",
+        ],
+        job=dict(
+            group="Video2World",
+            name="Cosmos_Predict2_14B_Video2World",
+        ),
+        model=dict(
+            latent_shape=[
+                16,
+                16,
+                88,
+                160,
+            ],
+        ),
+    )
+)
+
 
 cs = ConfigStore.instance()
 
 for _item in [
     Cosmos_Predict2_2B_Video2World,
+    Cosmos_Predict2_14B_Video2World,
 ]:
     cs.store(group="experiment", package="_global_", name=_item["job"]["name"], node=_item)

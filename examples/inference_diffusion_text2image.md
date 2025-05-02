@@ -19,13 +19,13 @@ Please refer to the Inference section of [INSTALL.md](/INSTALL.md#inference) for
    CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python scripts/download_diffusion_checkpoints.py --model_sizes 2B 14B --model_types Text2Image --checkpoint_dir checkpoints
    ```
 
-### GPU memory requirements
+<!-- ### GPU memory requirements
 
 We report the maximum observed GPU memory usage during end-to-end inference. Additionally, we offer a series of model offloading strategies to help users manage GPU memory usage effectively.
 
 For GPUs with limited memory, we recommend fully offloading all models. For higher-end GPUs, users can select the most suitable offloading strategy considering the numbers provided below.
 
-<!-- | Offloading Strategy | Cosmos-Predict2-2B-Text2World | Cosmos-Predict2-14B-Text2World |
+| Offloading Strategy | Cosmos-Predict2-2B-Text2World | Cosmos-Predict2-14B-Text2World |
 |-------------|---------|---------|
 | Offload prompt upsampler | - GB | > 80.0 GB |
 | Offload prompt upsampler & guardrails | - GB | - GB |

@@ -35,13 +35,15 @@ class CosmosT5TextEncoder(torch.nn.Module):
             device: The device to use for computations.
         """
         super().__init__()
-        try:
-            self.tokenizer = T5TokenizerFast.from_pretrained(cache_dir, cache_dir=cache_dir)
-            self.text_encoder = T5EncoderModel.from_pretrained(cache_dir, cache_dir=cache_dir).to(device)
-        except Exception as e:
-            log.warning(f"Failed to load T5 model using cache_dir '{cache_dir}', falling back to default location: {e}")
-            self.tokenizer = T5TokenizerFast.from_pretrained(model_name)
-            self.text_encoder = T5EncoderModel.from_pretrained(model_name).to(device)
+        self.tokenizer = T5TokenizerFast.from_pretrained(model_name, cache_dir=cache_dir)
+        self.text_encoder = T5EncoderModel.from_pretrained(model_name, cache_dir=cache_dir).to(device)
+        # try:
+        #     self.tokenizer = T5TokenizerFast.from_pretrained(model_name, cache_dir=cache_dir)
+        #     self.text_encoder = T5EncoderModel.from_pretrained(model_name, cache_dir=cache_dir).to(device)
+        # except Exception as e:
+        #     log.warning(f"Failed to load T5 model using cache_dir '{cache_dir}', falling back to default location: {e}")
+        #     self.tokenizer = T5TokenizerFast.from_pretrained(model_name)
+        #     self.text_encoder = T5EncoderModel.from_pretrained(model_name).to(device)
         self.text_encoder.eval()
         self.device = device
 
