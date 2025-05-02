@@ -49,16 +49,52 @@ CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/infer
 #### Example 1: single generation
 This is the basic example for running inference on the 2B model with a single image. No text prompts are provided here.
 ```bash
-CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/video2world.py \
-    --checkpoint_dir checkpoints \
-    --diffusion_transformer_dir Cosmos-Predict2-2B-Video2World \
-    --input_image_or_video_path assets/diffusion/video2world_input0.jpg \
-    --num_input_frames 1 \
-    --offload_prompt_upsampler \
-    --video_save_name diffusion-video2world-2b
+PROMPT="A nighttime city bus terminal gradually shifts from stillness to subtle movement. At first, multiple double-decker buses are parked under the glow of overhead lights, with a central bus labeled “87D” facing forward and stationary. As the video progresses, the bus in the middle moves ahead slowly, its headlights brightening the surrounding area and casting reflections onto adjacent vehicles. The motion creates space in the lineup, signaling activity within the otherwise quiet station. It then comes to a smooth stop, resuming its position in line. Overhead signage in Chinese characters remains illuminated, enhancing the vibrant, urban night scene."
+
+NEGATIVE_PROMPT="The video captures a series of frames showing ugly scenes, static with no motion, motion blur, over-saturation, shaky footage, low resolution, grainy texture, pixelated images, poorly lit areas, underexposed and overexposed scenes, poor color balance, washed out colors, choppy sequences, jerky movements, low frame rate, artifacting, color banding, unnatural transitions, outdated special effects, fake elements, unconvincing visuals, poorly edited content, jump cuts, visual noise, and flickering. Overall, the video is of poor quality."
 ```
 
-#### Example 2: single generation on the 14B model with model offloading
+#### Example 1: single generation on the 2B model
+This is the basic example for running inference on the 2B model with a single image. 
+<!-- No text prompts are provided here. -->
+
+```bash
+CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/video2world.py \
+    --checkpoint_dir checkpoints \
+    --input_image_or_video_path assets/video2world/input0.jpg \
+    --num_input_frames 1 \
+    --diffusion_transformer_dir Cosmos-Predict2-2B-Video2World \
+    --offload_prompt_upsampler \
+    --disable_prompt_upsampler \
+    --disable_guardrail \
+    --prompt "${PROMPT}" \
+    --negative_prompt "${NEGATIVE_PROMPT}" \
+    --height 432 --width 768 --num_video_frames 81 \
+    --num_steps 35 \
+    --video_save_name video2world_2b
+```
+
+#### Example 2: single generation on the 14B model
+This is the basic example for running inference on the 14B model with a single image. 
+<!-- No text prompts are provided here. -->
+
+```bash
+CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/video2world.py \
+    --checkpoint_dir checkpoints \
+    --input_image_or_video_path assets/video2world/input0.jpg \
+    --num_input_frames 1 \
+    --diffusion_transformer_dir Cosmos-Predict2-14B-Video2World \
+    --offload_prompt_upsampler \
+    --disable_prompt_upsampler \
+    --disable_guardrail \
+    --prompt "${PROMPT}" \
+    --negative_prompt "${NEGATIVE_PROMPT}" \
+    --height 432 --width 768 --num_video_frames 81 \
+    --num_steps 35 \
+    --video_save_name video2world_14b
+```
+
+<!-- #### Example 2: single generation on the 14B model with model offloading
 We run inference on the 14B model with offloading flags enabled. This is suitable for low-memory GPUs. Model offloading is also required for the 14B model to avoid OOM.
 ```bash
 CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/video2world.py \
@@ -122,4 +158,4 @@ CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/infer
     --num_input_frames 9 \
     --disable_prompt_upsampler \
     --video_save_folder diffusion-video2world-2b-batch-wo-ps
-```
+``` -->
