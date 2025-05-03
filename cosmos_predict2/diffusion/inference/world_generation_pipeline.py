@@ -15,7 +15,7 @@
 
 import gc
 
-# import os
+import os
 from typing import Any, Optional
 
 import einops
@@ -40,7 +40,7 @@ from cosmos_predict2.diffusion.model.model_v2w import DiffusionV2WModel
 #     run_chat_completion,
 # )
 from cosmos_predict2.diffusion.prompt_upsampler.video2world_prompt_upsampler_inference import (
-    # create_vlm_prompt_upsampler,
+    create_vlm_prompt_upsampler,
     prepare_dialog,
 )
 from cosmos_predict2.diffusion.prompt_upsampler.video2world_prompt_upsampler_inference import (
@@ -820,27 +820,24 @@ class DiffusionVideo2WorldGenerationPipeline(DiffusionText2WorldGenerationPipeli
             seed=seed,
         )
 
-    def _run_prompt_upsampler_on_prompt(self, image_or_video_path: str) -> str:
+    def _run_prompt_upsampler_on_prompt(self, image_or_video_path: str, prompt: str) -> str:
         """Enhance the input prompt using visual context from the conditioning image.
 
         Args:
             image_or_video_path: Path to conditioning image or video used for visual context
-
+            prompt: Input prompt to enhance
         Returns:
             str: Enhanced prompt incorporating visual details from the image
         """
-        dialog = prepare_dialog(image_or_video_path)
-        upsampled_prompt = run_chat_completion_vlm(
-            self.prompt_upsampler, dialog, max_gen_len=400, temperature=0.01, top_p=0.9, logprobs=False
-        )
+        dialog = prepare_dialog(image_or_video_path, prompt)
+        upsampled_prompt = run_chat_completion_vlm(self.prompt_processor, self.prompt_upsampler, dialog)
         log.info(f"Upsampled prompt: {upsampled_prompt}")
         return upsampled_prompt
 
     def _load_prompt_upsampler_model(self):
-        # self.prompt_upsampler = create_vlm_prompt_upsampler(
-        #     checkpoint_dir=os.path.join(self.checkpoint_dir, self.prompt_upsampler_dir),
-        # )
-        pass
+        self.prompt_processor, self.prompt_upsampler = create_vlm_prompt_upsampler(
+            checkpoint_dir=os.path.join(self.checkpoint_dir, self.prompt_upsampler_dir),
+        )
 
     def _load_model(self):
         self.model = load_model_by_config(
@@ -992,7 +989,9 @@ class DiffusionVideo2WorldGenerationPipeline(DiffusionText2WorldGenerationPipeli
 
         if self.enable_prompt_upsampler:
             log.info("Run prompt upsampler on image or video, input prompt is not used")
-            prompt = self._run_prompt_upsampler_on_prompt_with_offload(image_or_video_path=image_or_video_path)
+            prompt = self._run_prompt_upsampler_on_prompt_with_offload(
+                image_or_video_path=image_or_video_path, prompt=prompt
+            )
 
         log.info(f"Run with prompt: {prompt}")
         if not self.disable_guardrail:

@@ -15,17 +15,11 @@
 
 import argparse
 import hashlib
-import json
-import os
-import shutil
-from glob import glob
 from pathlib import Path
 
-import torch
 from huggingface_hub import snapshot_download
-from safetensors.torch import load_file
 
-from scripts.download_guardrail_checkpoints import download_guardrail_checkpoints
+# from scripts.download_guardrail_checkpoints import download_guardrail_checkpoints
 
 
 def parse_args():
@@ -69,6 +63,12 @@ MD5_CHECKSUM_LOOKUP = {
     "google-t5/t5-11b/tf_model.h5": "e081fc8bd5de5a6a9540568241ab8973",
     # wan2.1
     "Wan-AI/Wan2.1-T2V-1.3B/Wan2.1_VAE.pth": "854fcb755005951fa5b329799af6199f",
+    # Qwen2.5
+    "Qwen/Qwen2.5-VL-7B-Instruct/model-00001-of-00005.safetensors": "8644c8b51bc77b2e0c050ce5e7be30f7",
+    "Qwen/Qwen2.5-VL-7B-Instruct/model-00002-of-00005.safetensors": "1220b9cc11ac55254d4165e285c7e2d9",
+    "Qwen/Qwen2.5-VL-7B-Instruct/model-00003-of-00005.safetensors": "4ec40524f0a3e91ec66dc5729d46d118",
+    "Qwen/Qwen2.5-VL-7B-Instruct/model-00004-of-00005.safetensors": "7b5797821c1bbb60aa3dd9a65c88eedc",
+    "Qwen/Qwen2.5-VL-7B-Instruct/model-00005-of-00005.safetensors": "ab4fb1ef087d7df0bc0df603e017d3cd",
 }
 
 
@@ -107,8 +107,9 @@ def main(args):
         "google-t5/t5-11b",
     ]
 
-    # if "Text2World" in args.model_types:
-    #     extra_models.append("Cosmos-UpsamplePrompt1-12B-Text2World")
+    if "Video2World" in args.model_types:
+        # prompt upsampler for video2world
+        extra_models.append("Qwen/Qwen2.5-VL-7B-Instruct")
 
     # Create local checkpoints folder
     checkpoints_dir = Path(args.checkpoint_dir)
@@ -135,7 +136,7 @@ def main(args):
 
     # Download the always-included models
     for model_name in extra_models:
-        if model_name in ("google-t5/t5-11b", "Wan-AI/Wan2.1-T2V-1.3B"):
+        if model_name in ("google-t5/t5-11b", "Wan-AI/Wan2.1-T2V-1.3B", "Qwen/Qwen2.5-VL-7B-Instruct"):
             repo_id = model_name
         else:
             repo_id = f"{ORG_NAME}/{model_name}"
@@ -154,14 +155,6 @@ def main(args):
                 local_dir_use_symlinks=False,
                 **download_kwargs,
             )
-
-    # if "Video2World" in args.model_types:
-    #     # Prompt Upsampler for Cosmos-Predict1-Video2World models
-    #     convert_pixtral_checkpoint(
-    #         checkpoint_dir=args.checkpoint_dir,
-    #         checkpoint_name="Pixtral-12B",
-    #         vit_type="pixtral-12b-vit",
-    #     )
 
     # download_guardrail_checkpoints(args.checkpoint_dir)
 
