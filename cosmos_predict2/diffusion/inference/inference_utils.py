@@ -128,7 +128,7 @@ def add_common_arguments(parser):
     )
     parser.add_argument("--height", type=int, default=704, help="Height of video to sample")
     parser.add_argument("--width", type=int, default=1280, help="Width of video to sample")
-    parser.add_argument("--fps", type=int, default=24, help="FPS of the sampled video")
+    parser.add_argument("--fps", type=int, default=16, help="FPS of the sampled video")
     parser.add_argument("--seed", type=int, default=1, help="Random seed")
     parser.add_argument("--num_gpus", type=int, default=1, help="Number of GPUs used to run inference in parallel.")
     parser.add_argument(
