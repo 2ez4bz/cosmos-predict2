@@ -13,9 +13,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from typing import Optional
+
 import torch
 from torch import Tensor
-from torch.distributed import ProcessGroup, all_gather, get_process_group_ranks, get_world_size
+from torch.distributed import ProcessGroup, all_gather, broadcast_object_list, get_process_group_ranks, get_world_size
+from torch.distributed.utils import _verify_param_shape_across_processes
+
+from cosmos_predict2.utils import distributed
 
 
 def split_inputs_cp(x: Tensor, seq_dim: int, cp_group: ProcessGroup) -> Tensor:
@@ -120,3 +125,67 @@ def cat_outputs_cp_with_grad(x: Tensor, seq_dim: int, cp_group: ProcessGroup) ->
     gathered_tensors[rank] = x
     # Concatenate the gathered tensors along the specified dimension
     return torch.cat(gathered_tensors, dim=seq_dim)
+
+
+def robust_broadcast(tensor: torch.Tensor, src: int, pg: ProcessGroup, is_check_shape: bool = False) -> torch.Tensor:
+    """
+    Perform a robust broadcast operation that works regardless of tensor shapes on different ranks.
+
+    Args:
+        tensor (torch.Tensor): The tensor to broadcast (on src rank) or receive (on other ranks).
+        src (int): The source rank for the broadcast. Defaults to 0.
+
+    Returns:
+        torch.Tensor: The broadcasted tensor on all ranks.
+    """
+    # First, broadcast the shape of the tensor
+    if distributed.get_rank() == src:
+        shape = torch.tensor(tensor.shape).cuda()
+    else:
+        shape = torch.empty(tensor.dim(), dtype=torch.long).cuda()
+    if is_check_shape:
+        _verify_param_shape_across_processes(pg, [shape])
+    torch.distributed.broadcast(shape, src, group=pg)
+
+    # Resize the tensor on non-src ranks if necessary
+    if distributed.get_rank() != src:
+        tensor = tensor.new_empty(shape.tolist()).type_as(tensor)
+
+    # Now broadcast the tensor data
+    torch.distributed.broadcast(tensor, src, group=pg)
+
+    return tensor
+
+
+def broadcast(
+    item: torch.Tensor | str | None, process_group: Optional[ProcessGroup] = None
+) -> torch.Tensor | str | None:
+    """
+    Broadcast the item from the minimum rank in the specified group(s).
+    """
+    if process_group is None:
+        return item
+
+    min_rank = min(get_process_group_ranks(process_group))
+    if isinstance(item, torch.Tensor):  # assume the device is cuda
+        item = robust_broadcast(item, min_rank, process_group)
+    elif item is not None:
+        broadcastable_list = [item]
+        broadcast_object_list(broadcastable_list, min_rank, group=process_group)
+        item = broadcastable_list[0]
+    return item
+
+
+def broadcast_split_tensor(
+    tensor: torch.Tensor,
+    seq_dim: int,
+    process_group: Optional[ProcessGroup] = None,
+) -> torch.Tensor:
+    """
+    Broadcast the tensor from the minimum rank in the specified group(s).
+    """
+    if tensor is None:
+        return tensor
+    min_rank = min(get_process_group_ranks(process_group))
+    tensor = robust_broadcast(tensor, min_rank, process_group)
+    return split_inputs_cp(tensor, seq_dim, process_group)

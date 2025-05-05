@@ -20,8 +20,8 @@ from cosmos_predict2.utils.lazy_config import LazyDict
 Cosmos_Predict2_2B_Video2World: LazyDict = LazyDict(
     dict(
         defaults=[
-            {"override /net": "cosmos_predict2_net_2b"},
-            {"override /conditioner": "add_fps_padding_mask"},
+            {"override /net": "cosmos_predict2_net_v2w_2b"},
+            {"override /conditioner": "add_fps_padding_mask_v2w"},
             {"override /tokenizer": "wan2pt1_tokenizer"},
             "_self_",
         ],
@@ -43,8 +43,8 @@ Cosmos_Predict2_2B_Video2World: LazyDict = LazyDict(
 Cosmos_Predict2_14B_Video2World: LazyDict = LazyDict(
     dict(
         defaults=[
-            {"override /net": "cosmos_predict2_net_14b"},
-            {"override /conditioner": "add_fps_padding_mask"},
+            {"override /net": "cosmos_predict2_net_v2w_14b"},
+            {"override /conditioner": "add_fps_padding_mask_v2w"},
             {"override /tokenizer": "wan2pt1_tokenizer"},
             "_self_",
         ],

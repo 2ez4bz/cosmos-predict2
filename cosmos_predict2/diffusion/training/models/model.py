@@ -13,72 +13,50 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+import collections
 import math
-from typing import Any, Callable, Dict, List, Mapping, Optional, Tuple, Union
+from contextlib import contextmanager
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 import amp_C
-import collections
+import numpy as np
 import torch
-from apex.multi_tensor_apply import multi_tensor_applier
+import torch.nn.functional as F
 from einops import rearrange
 from megatron.core import parallel_state
 from torch import Tensor
-from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors
-from torch.distributed import broadcast_object_list, get_process_group_ranks
+from torch.distributed import ProcessGroup, broadcast_object_list, get_process_group_ranks
+from torch.distributed._composable.fsdp import FSDPModule, fully_shard
+from torch.distributed._tensor.api import DTensor
 from torch.distributed.utils import _verify_param_shape_across_processes
-from dataclasses import dataclass, fields
+from torch.nn.modules.module import _IncompatibleKeys
 
-from cosmos_predict2.diffusion.modules.res_sampler import COMMON_SOLVER_OPTIONS
-from cosmos_predict2.diffusion.training.conditioner import BaseVideoCondition, DataType
 from cosmos_predict2.diffusion.conditioner import CosmosCondition  # TODO:
+from cosmos_predict2.diffusion.inference.inference_utils import non_strict_load_model
+from cosmos_predict2.diffusion.module.pretrained_vae import BaseVAE
+from cosmos_predict2.diffusion.modules.denoiser_scaling import RectifiedFlowScaling
+from cosmos_predict2.diffusion.modules.res_sampler import COMMON_SOLVER_OPTIONS, Sampler
+from cosmos_predict2.diffusion.training.conditioner import DataType
 from cosmos_predict2.diffusion.training.context_parallel import cat_outputs_cp, split_inputs_cp
+from cosmos_predict2.diffusion.training.networks.model_weights_stats import WeightTrainingStat
+from cosmos_predict2.diffusion.training.utils.dtensor_helper import (
+    DTensorFastEmaModelUpdater,
+    broadcast_dtensor_model_states,
+)
+from cosmos_predict2.diffusion.training.utils.fsdp_helper import hsdp_device_mesh
+from cosmos_predict2.diffusion.training.utils.optim_instantiate import get_base_scheduler
+from cosmos_predict2.diffusion.training.utils.torch_futrure import clip_grad_norm_
+from cosmos_predict2.diffusion.types import DenoisePrediction
 
 # from cosmos_predict2.diffusion.training.models.model_image import CosmosCondition
 # from cosmos_predict2.diffusion.training.models.model_image import DiffusionModel as ImageModel
 # from cosmos_predict2.diffusion.training.models.model_image import diffusion_fsdp_class_decorator
 from cosmos_predict2.utils import distributed, log, misc
-from cosmos_predict2.utils.model import Model
-from cosmos_predict2.diffusion.training.utils.dtensor_helper import (
-    DTensorFastEmaModelUpdater,
-    broadcast_dtensor_model_states,
-)
-from torch.distributed import ProcessGroup, all_gather, broadcast_object_list, get_process_group_ranks, get_world_size
-from cosmos_predict2.diffusion.training.networks.model_weights_stats import WeightTrainingStat
-from cosmos_predict2.diffusion.inference.inference_utils import non_strict_load_model
-
-import functools
-from contextlib import contextmanager
-from dataclasses import dataclass, fields
-from typing import Any, Callable, Dict, Mapping, Optional, Tuple, Type, TypeVar
-
-import numpy as np
-import torch
-import torch.nn.functional as F
-from megatron.core import parallel_state
-from torch.distributed.fsdp import FullStateDictConfig
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp import ShardingStrategy, StateDictType
-from torch.distributed.fsdp.wrap import size_based_auto_wrap_policy
-from torch.nn.modules.module import _IncompatibleKeys
-
-from cosmos_predict2.diffusion.functional.batch_ops import batch_mul
-from cosmos_predict2.diffusion.module.blocks import FourierFeatures
-from cosmos_predict2.diffusion.module.pretrained_vae import BaseVAE
-from cosmos_predict2.diffusion.modules.denoiser_scaling import RectifiedFlowScaling
-from cosmos_predict2.diffusion.modules.res_sampler import COMMON_SOLVER_OPTIONS, Sampler
-from cosmos_predict2.diffusion.training.functional.loss import create_per_sample_loss_mask
-from cosmos_predict2.diffusion.training.utils.fsdp_helper import apply_fsdp_checkpointing, hsdp_device_mesh
-from cosmos_predict2.diffusion.training.utils.optim_instantiate import get_base_scheduler
-from cosmos_predict2.diffusion.types import DenoisePrediction
-from cosmos_predict2.utils import distributed, log, misc
 from cosmos_predict2.utils.ema import FastEmaModelUpdater
 from cosmos_predict2.utils.lazy_config import LazyDict
 from cosmos_predict2.utils.lazy_config import instantiate as lazy_instantiate
-from cosmos_predict2.utils.model import Model
 from cosmos_predict2.utils.misc import count_params
-from torch.distributed._composable.fsdp import FSDPModule, fully_shard
-from torch.distributed._tensor.api import DTensor
-from cosmos_predict2.diffusion.training.utils.torch_futrure import clip_grad_norm_
+from cosmos_predict2.utils.model import Model
 
 l2_norm_impl = amp_C.multi_tensor_l2norm
 multi_tensor_scale_impl = amp_C.multi_tensor_scale

@@ -18,7 +18,13 @@ from typing import Dict, List, Optional
 import attrs
 import torch
 
-from cosmos_predict2.diffusion.conditioner import BaseConditionEntry, TextAttr, VideoConditioner, VideoExtendConditioner
+from cosmos_predict2.diffusion.conditioner import (
+    BaseConditionEntry,
+    TextAttr,
+    VideoConditioner,
+    VideoExtendConditioner,
+    VideoV2WConditioner,
+)
 from cosmos_predict2.utils.lazy_config import LazyCall as L
 from cosmos_predict2.utils.lazy_config import LazyDict
 
@@ -247,6 +253,51 @@ VideoConditionerFpsPaddingConfig: LazyDict = L(VideoConditioner)(
     text=TextConfig(),
     fps=FPSConfig(),
     padding_mask=PaddingMaskConfig(),
+)
+
+# _SHARED_CONFIG = dict(
+#     fps=L(ReMapkey)(
+#         input_key="fps",
+#         output_key="fps",
+#         dropout_rate=0.0,
+#         dtype=None,
+#     ),
+#     padding_mask=L(ReMapkey)(
+#         input_key="padding_mask",
+#         output_key="padding_mask",
+#         dropout_rate=0.0,
+#         dtype=None,
+#     ),
+#     text=L(TextAttr)(
+#         input_key=["t5_text_embeddings"],
+#         dropout_rate=0.2,
+#     ),
+#     use_video_condition=L(BooleanFlag)(
+#         input_key="fps",
+#         output_key="use_video_condition",
+#         dropout_rate=0.2,
+#     ),
+# )
+
+# VideoPredictionConditionerConfig: LazyDict = L(VideoV2WConditioner)(
+#     **_SHARED_CONFIG,
+# )
+
+# VideoConditionerFpsPaddingV2WConfig: LazyDict = L(VideoV2WConditioner)(
+#     **_SHARED_CONFIG,
+# )
+
+
+VideoConditionerFpsPaddingV2WConfig: LazyDict = L(VideoV2WConditioner)(
+    text=TextConfig(),
+    fps=FPSConfig(),
+    padding_mask=PaddingMaskConfig(),
+    # use_video_condition=L(BooleanFlag)(
+    #     # input_key="fps",
+    #     output_key="use_video_condition",
+    #     # dropout_rate=0.2,
+    # ),
+    # use_video_condition=True,
 )
 
 VideoExtendConditionerFrameRepeatConfig: LazyDict = L(VideoExtendConditioner)(

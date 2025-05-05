@@ -29,6 +29,7 @@ class EDMScaling:
         c_noise = 0.25 * sigma.log()
         return c_skip, c_out, c_in, c_noise
 
+
 class RectifiedFlowScaling:
     def __init__(self, sigma_data: float = 1.0):
         assert abs(sigma_data - 1.0) < 1e-6, "sigma_data must be 1.0 for RectifiedFlowScaling"

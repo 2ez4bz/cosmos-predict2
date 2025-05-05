@@ -14,23 +14,22 @@
 # limitations under the License.
 
 import gc
-
 import os
 from typing import Any, Optional
 
-import einops
 import numpy as np
 import torch
 
-from cosmos_predict2.diffusion.inference.inference_utils import (
-    # generate_image_from_text,
+from cosmos_predict2.diffusion.inference.inference_utils import (  # generate_image_from_text,
     generate_world_from_text,
     generate_world_from_video,
+    generate_world_from_video_i4,
     get_condition_latent,
     get_video_batch,
     load_model_by_config,
     load_network_model,
     load_tokenizer_model,
+    read_and_process_image,
 )
 from cosmos_predict2.diffusion.model.model_t2w import DiffusionT2WModel
 from cosmos_predict2.diffusion.model.model_v2w import DiffusionV2WModel
@@ -842,14 +841,15 @@ class DiffusionVideo2WorldGenerationPipeline(DiffusionText2WorldGenerationPipeli
     def _load_model(self):
         self.model = load_model_by_config(
             config_job_name=self.model_name,
-            config_file="cosmos_predict2/diffusion/config/config.py",
+            config_file="cosmos_predict2/diffusion/config/config_v2w.py",
             model_class=DiffusionV2WModel,
         )
 
     def _run_model(
         self,
+        video_input: torch.Tensor,
         embedding: torch.Tensor,
-        condition_latent: torch.Tensor,
+        condition_latent: torch.Tensor | None,
         negative_prompt_embedding: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Generate video frames using the diffusion model.
@@ -877,16 +877,28 @@ class DiffusionVideo2WorldGenerationPipeline(DiffusionText2WorldGenerationPipeli
             num_video_frames=self.num_video_frames,
         )
 
+        data_batch["video"] = video_input
+
         # Generate video frames
-        video = generate_world_from_video(
+        # video = generate_world_from_video(
+        #     model=self.model,
+        #     state_shape=self.model.state_shape,
+        #     is_negative_prompt=True,
+        #     data_batch=data_batch,
+        #     guidance=self.guidance,
+        #     num_steps=self.num_steps,
+        #     seed=self.seed,
+        #     condition_latent=condition_latent,
+        #     num_input_frames=self.num_input_frames,
+        # )
+
+        video = generate_world_from_video_i4(
             model=self.model,
-            state_shape=self.model.state_shape,
             is_negative_prompt=True,
             data_batch=data_batch,
             guidance=self.guidance,
             num_steps=self.num_steps,
             seed=self.seed,
-            condition_latent=condition_latent,
             num_input_frames=self.num_input_frames,
         )
 
@@ -938,12 +950,19 @@ class DiffusionVideo2WorldGenerationPipeline(DiffusionText2WorldGenerationPipeli
             self.height // self.model.tokenizer.spatial_compression_factor,
             self.width // self.model.tokenizer.spatial_compression_factor,
         ]
-        condition_latent = self._run_tokenizer_encoding(image_or_video_path)
+        # condition_latent = self._run_tokenizer_encoding(image_or_video_path)
+
+        video_input = read_and_process_image(
+            image_or_video_path, [self.height, self.width], self.num_video_frames, resize=True
+        )
 
         if self.offload_network:
             self._load_network()
 
-        sample = self._run_model(prompt_embedding, condition_latent, negative_prompt_embedding)
+        # sample = self._run_model(prompt_embedding, condition_latent, negative_prompt_embedding)
+        sample = self._run_model(
+            video_input, prompt_embedding, condition_latent=None, negative_prompt_embedding=negative_prompt_embedding
+        )
 
         if self.offload_network:
             self._offload_network()

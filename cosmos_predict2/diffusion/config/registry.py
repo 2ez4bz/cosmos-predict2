@@ -18,6 +18,7 @@ from hydra.core.config_store import ConfigStore
 from cosmos_predict2.diffusion.config.base.conditioner import (
     BaseVideoConditionerConfig,
     VideoConditionerFpsPaddingConfig,
+    VideoConditionerFpsPaddingV2WConfig,
     VideoConditionerFpsSizePaddingConfig,
     VideoConditionerFpsSizePaddingFrameRepeatConfig,
     VideoExtendConditionerConfig,
@@ -28,6 +29,8 @@ from cosmos_predict2.diffusion.config.base.net import (
     FADITV2Config,
     COSMOS_PREDICT2_NET_2B_Config,
     COSMOS_PREDICT2_NET_14B_Config,
+    COSMOS_PREDICT2_NET_V2W_2B_Config,
+    COSMOS_PREDICT2_NET_V2W_14B_Config,
 )
 from cosmos_predict2.diffusion.config.base.tokenizer import (
     get_cosmos_diffusion_tokenizer_comp8x8x8,
@@ -60,6 +63,18 @@ def register_net(cs):
         name="cosmos_predict2_net_14b",
         node=COSMOS_PREDICT2_NET_14B_Config,
     )
+    cs.store(
+        group="net",
+        package="model.net",
+        name="cosmos_predict2_net_v2w_2b",
+        node=COSMOS_PREDICT2_NET_V2W_2B_Config,
+    )
+    cs.store(
+        group="net",
+        package="model.net",
+        name="cosmos_predict2_net_v2w_14b",
+        node=COSMOS_PREDICT2_NET_V2W_14B_Config,
+    )
 
 
 def register_conditioner(cs):
@@ -80,6 +95,12 @@ def register_conditioner(cs):
         package="model.conditioner",
         name="add_fps_padding_mask",
         node=VideoConditionerFpsPaddingConfig,
+    )
+    cs.store(
+        group="conditioner",
+        package="model.conditioner",
+        name="add_fps_padding_mask_v2w",
+        node=VideoConditionerFpsPaddingV2WConfig,
     )
     cs.store(
         group="conditioner",

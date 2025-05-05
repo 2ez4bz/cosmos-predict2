@@ -14,11 +14,10 @@
 # limitations under the License.
 
 from enum import Enum
-from typing import List
 
 import attrs
 
-from cosmos_predict2.diffusion.training.config.base.ema import PowerEMAConfig, EMAConfig
+from cosmos_predict2.diffusion.training.config.base.ema import EMAConfig, PowerEMAConfig
 from cosmos_predict2.diffusion.training.modules.edm_sde import EDMSDE
 from cosmos_predict2.utils.lazy_config import LazyCall as L
 from cosmos_predict2.utils.lazy_config import LazyDict
@@ -70,6 +69,6 @@ class ConditioningStrategy(Enum):
 @attrs.define(slots=False)
 class Vid2VidModelConfig(DefaultModelConfig):
     min_num_conditional_frames: int = 1  # Minimum number of latent conditional frames
-    max_num_conditional_frames: int = 2  # Maximum number of latent conditional frames
+    max_num_conditional_frames: int = 1  # Maximum number of latent conditional frames
     sigma_conditional: float = 0.0001  # Noise level used for conditional frames
     conditioning_strategy: str = str(ConditioningStrategy.FRAME_REPLACE)  # What strategy to use for conditioning
