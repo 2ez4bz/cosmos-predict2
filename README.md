@@ -39,7 +39,7 @@ conda env create --file cosmos-predict2.yaml
 conda activate cosmos-predict2
 # Install the dependencies.
 pip install -r requirements.txt
-pip install flash-attn --no-build-isolation
+pip install flash-attn==2.7.4.post1 --no-build-isolation
 # Patch Transformer engine linking issues in conda environments.
 ln -sf $CONDA_PREFIX/lib/python3.10/site-packages/nvidia/*/include/* $CONDA_PREFIX/include/
 ln -sf $CONDA_PREFIX/lib/python3.10/site-packages/nvidia/*/include/* $CONDA_PREFIX/include/python3.10

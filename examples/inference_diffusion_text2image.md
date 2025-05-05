@@ -57,6 +57,7 @@ NEGATIVE_PROMPT="The video captures a series of frames showing ugly scenes, stat
 
 #### Example 1: single generation on the 2B model
 This is the basic example for running inference on the 2B model with a single prompt.
+The output is saved to `outputs/text2image_2b.jpg` alongside the corresponding prompt at `outputs/text2image_2b.txt`.
 ```bash
 CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/text2image.py \
     --checkpoint_dir checkpoints \
@@ -72,6 +73,7 @@ CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/infer
 #### Example 2: single generation on the 14B model
 <!-- We run inference on the 14B model with offloading flags enabled. This is suitable for low-memory GPUs. Model offloading is also required for the 14B model to avoid OOM. -->
 This is the basic example for running inference on the 14B model with a single prompt.
+The output is saved to `outputs/text2image_14b.jpg` alongside the corresponding prompt at `outputs/text2image_14b.txt`.
 ```bash
 CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/text2image.py \
     --checkpoint_dir checkpoints \

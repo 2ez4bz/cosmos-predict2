@@ -57,7 +57,7 @@ NEGATIVE_PROMPT="The video captures a series of frames showing ugly scenes, stat
 
 #### Example 1: single generation on the 2B model
 This is the basic example for running inference on the 2B model with a single image. 
-<!-- No text prompts are provided here. -->
+The output is saved to `outputs/video2world_2b.mp4` alongside the corresponding prompt at `outputs/video2world_2b.txt`.
 
 ```bash
 CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/video2world.py \
@@ -91,12 +91,17 @@ CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/infer
     --negative_prompt "${NEGATIVE_PROMPT}" \
     --height 432 --width 768 --num_video_frames 81 \
     --num_steps 35 \
-    --video_save_name video2world_2b_upsampled
+    --video_save_name video2world_2b_prompt_upsampled
+```
+
+With the prompt upsampler enabled, the video is generated from the below upsampled prompt.
+```bash
+A nighttime city bus terminal illuminated by artificial lights, showcasing a bustling urban environment. Several buses, including a prominent yellow double-decker, are parked along the platform, their headlights and taillights casting a warm glow. The terminal is set against a backdrop of tall buildings, their windows reflecting the city lights. The sky is overcast, adding a moody ambiance to the scene. A close-up shot captures the details of the buses and the platform, emphasizing the dynamic energy of the terminal.
 ```
 
 #### Example 2: single generation on the 14B model
 This is the basic example for running inference on the 14B model with a single image. 
-<!-- No text prompts are provided here. -->
+The output is saved to `outputs/video2world_14b.mp4` alongside the corresponding prompt at `outputs/video2world_14b.txt`.
 
 ```bash
 CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/video2world.py \
