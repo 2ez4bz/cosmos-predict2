@@ -75,6 +75,25 @@ CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/infer
     --video_save_name video2world_2b
 ```
 
+We also support running with prompt upsampler that extends short prompts to add more details to help generating videos.
+```bash
+PROMPT="A nighttime city bus terminal."
+
+CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/inference/video2world.py \
+    --checkpoint_dir checkpoints \
+    --prompt_upsampler_dir Qwen/Qwen2.5-VL-7B-Instruct \
+    --input_image_or_video_path assets/video2world/input0.jpg \
+    --num_input_frames 1 \
+    --diffusion_transformer_dir Cosmos-Predict2-2B-Video2World \
+    --offload_prompt_upsampler \
+    --disable_guardrail \
+    --prompt "${PROMPT}" \
+    --negative_prompt "${NEGATIVE_PROMPT}" \
+    --height 432 --width 768 --num_video_frames 81 \
+    --num_steps 35 \
+    --video_save_name video2world_2b_upsampled
+```
+
 #### Example 2: single generation on the 14B model
 This is the basic example for running inference on the 14B model with a single image. 
 <!-- No text prompts are provided here. -->
