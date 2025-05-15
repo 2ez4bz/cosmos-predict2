@@ -20,15 +20,6 @@ from typing import Optional
 
 import torch
 
-
-@dataclass
-class LabelImageCondition:
-    label: torch.Tensor
-
-    def get_classifier_free_guidance_condition(self) -> LabelImageCondition:
-        return LabelImageCondition(torch.zeros_like(self.label))
-
-
 @dataclass
 class DenoisePrediction:
     x0: torch.Tensor  # clean data prediction

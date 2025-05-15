@@ -22,13 +22,12 @@ from cosmos_predict2.diffusion.training.modules.edm_sde import EDMSDE
 from cosmos_predict2.utils.lazy_config import LazyCall as L
 from cosmos_predict2.utils.lazy_config import LazyDict
 
+class ConditioningStrategy(Enum):
+    FRAME_REPLACE = "frame_replace"  # First few frames of the video are replaced with the conditional frames
+    CHANNEL_CONCAT = "channel_concat"  # First few frames of the video are concatenated in the channel dimension
 
 @attrs.define(slots=False)
 class DefaultModelConfig:
-    """
-    Config for [DiffusionModel][projects.cosmos.diffusion.v2.models.t2v_model.DiffusionModel].
-    """
-
     tokenizer: LazyDict = None
     conditioner: LazyDict = None
     net: LazyDict = None
@@ -57,18 +56,11 @@ class DefaultModelConfig:
         False  # whether or not resize the video online; usecase: we load a long duration video and resize to fewer frames, simulate low fps video. If true, it use tokenizer and state_t to infer the expected length of the resized video.
     )
 
-    def __post_init__(self):
-        assert self.scaling == "rectified_flow"
-
-
-class ConditioningStrategy(Enum):
-    FRAME_REPLACE = "frame_replace"  # First few frames of the video are replaced with the conditional frames
-    CHANNEL_CONCAT = "channel_concat"  # First few frames of the video are concatenated in the channel dimension
-
-
-@attrs.define(slots=False)
-class Vid2VidModelConfig(DefaultModelConfig):
     min_num_conditional_frames: int = 1  # Minimum number of latent conditional frames
     max_num_conditional_frames: int = 1  # Maximum number of latent conditional frames
     sigma_conditional: float = 0.0001  # Noise level used for conditional frames
     conditioning_strategy: str = str(ConditioningStrategy.FRAME_REPLACE)  # What strategy to use for conditioning
+
+
+    def __post_init__(self):
+        assert self.scaling == "rectified_flow"

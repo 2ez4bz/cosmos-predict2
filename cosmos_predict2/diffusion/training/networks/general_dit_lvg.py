@@ -41,7 +41,7 @@ class VideoExtendGeneralDIT(GeneralDIT):
         del kwargs
 
         if data_type == DataType.VIDEO:
-            x_B_C_T_H_W = torch.cat([x_B_C_T_H_W, condition_video_input_mask_B_C_T_H_W], dim=1)
+            x_B_C_T_H_W = torch.cat([x_B_C_T_H_W, condition_video_input_mask_B_C_T_H_W.type_as(x_B_C_T_H_W)], dim=1)
         else:
             B, _, T, H, W = x_B_C_T_H_W.shape
             x_B_C_T_H_W = torch.cat(

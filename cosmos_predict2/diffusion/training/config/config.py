@@ -18,9 +18,6 @@ from typing import Any, List
 import attrs
 
 from cosmos_predict2.diffusion.training.config.base.model import DefaultModelConfig
-from cosmos_predict2.diffusion.training.config.text2world.registry import (
-    register_configs as register_configs_text2world,
-)
 from cosmos_predict2.diffusion.training.config.video2world.registry import (
     register_configs as register_configs_video2world,
 )
@@ -46,7 +43,7 @@ class Config(config.Config):
             {"scheduler": "lambdalinear"},
             {"callbacks": None},
             {"net": None},
-            {"conditioner": "add_fps_image_size_padding_mask"},
+            {"conditioner": "video_prediction_conditioner"},
             {"ema": "power"},
             {"tokenizer": "wan2pt1_tokenizer"},
             {"checkpoint": "pbss"},
@@ -84,12 +81,10 @@ def make_config():
     c.checkpoint = None
 
     # Call this function to register config groups.
-    register_configs_text2world()
     register_configs_video2world()
 
     # experiment config are defined in the experiment folder
     # call import_all_modules_from_package to register them
-    import_all_modules_from_package("cosmos_predict2.diffusion.training.config.text2world", reload=True)
     import_all_modules_from_package("cosmos_predict2.diffusion.training.config.video2world", reload=True)
 
     return c

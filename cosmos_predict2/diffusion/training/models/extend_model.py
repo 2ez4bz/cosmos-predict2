@@ -16,66 +16,32 @@
 import torch
 from einops import rearrange
 from megatron.core import parallel_state
-from typing import Callable, Dict
+from typing import Callable, Dict, Tuple
 
 from cosmos_predict2.diffusion.training.models.model import (
-    DiffusionModel as T2VModel,
+    DiffusionModel as BaseModel,
     DenoisePrediction,
     broadcast_split_tensor,
     CosmosCondition,
 )
+from torch import Tensor
 from cosmos_predict2.diffusion.training.config.base.model import ConditioningStrategy
 from cosmos_predict2.diffusion.training.conditioner import DataType
 
 NUM_CONDITIONAL_FRAMES_KEY: str = "num_conditional_frames"
 
 
-class Vid2VidModel(T2VModel):
-    def broadcast_split_for_model_parallelsim(
-        self, x0_B_C_T_H_W, condition, epsilon_B_C_T_H_W, sigma_B_T, is_train=True, num_conditional_frames=1
-    ):
-        # Fist form conditional video input mask and split it for model parallelism
-        B, _, T, H, W = x0_B_C_T_H_W.shape
-        x0_B_C_T_H_W = x0_B_C_T_H_W.to(**self.tensor_kwargs)
-        condition_video_input_mask_B_C_T_H_W = torch.zeros(
-            (B, 1, T, H, W), dtype=x0_B_C_T_H_W.dtype, device=x0_B_C_T_H_W.device
-        )
-
-        is_video_batch = T > 1
-        if is_video_batch:
-            if is_train:
-                # Randomly sample the number of conditional frames during training
-                num_conditional_frames_batch = torch.randint(
-                    self.config.min_num_conditional_frames, self.config.max_num_conditional_frames + 1, size=(B,)
-                )
-            else:
-                # Use only the minimum number of conditional frames during inference
-                num_conditional_frames_batch = torch.ones(B, dtype=torch.int32) * num_conditional_frames
-        else:
-            # For image batch, we don't use any conditional frames
-            num_conditional_frames_batch = torch.zeros(B, dtype=torch.int32)
-
-        if is_video_batch:
-            for idx in range(B):
-                condition_video_input_mask_B_C_T_H_W[idx, :, : num_conditional_frames_batch[idx], :, :] += 1
-
-        x0_B_C_T_H_W, condition, epsilon_B_C_T_H_W, sigma_B_T = super().broadcast_split_for_model_parallelsim(
-            x0_B_C_T_H_W, condition, epsilon_B_C_T_H_W, sigma_B_T
-        )
-
-        # Broadcast the condition_video_input_mask_B_C_T_H_W
-        if is_video_batch:
-            cp_group = self.get_context_parallel_group()
-            cp_size = 1 if cp_group is None else cp_group.size()
-            if cp_size > 1:
-                condition_video_input_mask_B_C_T_H_W = broadcast_split_tensor(
-                    condition_video_input_mask_B_C_T_H_W, seq_dim=2, process_group=cp_group
-                )
-
+class Vid2VidModel(BaseModel):
+    def get_data_and_condition(self, data_batch: dict[str, torch.Tensor]) -> Tuple[Tensor, Tensor, CosmosCondition]:
+        # generate random number of conditional frames for training
+        raw_state, latent_state, condition = super().get_data_and_condition(data_batch)
         condition = condition.set_video_condition(
-            x0_B_C_T_H_W, condition_video_input_mask_B_C_T_H_W, num_conditional_frames_batch
+            gt_frames=latent_state.to(**self.tensor_kwargs),
+            random_min_num_conditional_frames=self.config.min_num_conditional_frames,
+            random_max_num_conditional_frames=self.config.max_num_conditional_frames,
+            num_conditional_frames=None,
         )
-        return x0_B_C_T_H_W, condition, epsilon_B_C_T_H_W, sigma_B_T
+        return raw_state, latent_state, condition
 
     def denoise(self, xt_B_C_T_H_W: torch.Tensor, sigma: torch.Tensor, condition: CosmosCondition) -> DenoisePrediction:
         """
@@ -84,15 +50,13 @@ class Vid2VidModel(T2VModel):
         Args:
             xt (torch.Tensor): The input noise data.
             sigma (torch.Tensor): The noise level.
-            condition (CosmosCondition): conditional information, generated from self.conditioner
+            condition (T2VCondition): conditional information, generated from self.conditioner
 
         Returns:
             DenoisePrediction: The denoised prediction, it includes clean data predicton (x0), \
                 noise prediction (eps_pred).
         """
 
-        xt_B_C_T_H_W = xt_B_C_T_H_W.to(**self.tensor_kwargs)
-        sigma = sigma.to(**self.tensor_kwargs)
         if sigma.ndim == 1:
             sigma_B_T = rearrange(sigma, "b -> b 1")
         elif sigma.ndim == 2:
@@ -107,13 +71,15 @@ class Vid2VidModel(T2VModel):
         net_state_in_B_C_T_H_W = xt_B_C_T_H_W * c_in_B_1_T_1_1
 
         if condition.is_video:
-            condition_state_in_B_C_T_H_W = condition.gt_frames / self.config.sigma_data
+            condition_state_in_B_C_T_H_W = condition.gt_frames.type_as(net_state_in_B_C_T_H_W) / self.config.sigma_data
             if not condition.use_video_condition:
                 # When using random dropout, we zero out the ground truth frames
                 condition_state_in_B_C_T_H_W = condition_state_in_B_C_T_H_W * 0
 
             _, C, _, _, _ = xt_B_C_T_H_W.shape
-            condition_video_mask = condition.condition_video_input_mask_B_C_T_H_W.repeat(1, C, 1, 1, 1)
+            condition_video_mask = condition.condition_video_input_mask_B_C_T_H_W.repeat(1, C, 1, 1, 1).type_as(
+                net_state_in_B_C_T_H_W
+            )
 
             if self.config.conditioning_strategy == str(ConditioningStrategy.FRAME_REPLACE):
                 # In case of frame replacement strategy, replace the first few frames of the video with the conditional frames
@@ -146,17 +112,21 @@ class Vid2VidModel(T2VModel):
 
         # forward pass through the network
         net_output_B_C_T_H_W = self.net(
-            x_B_C_T_H_W=net_state_in_B_C_T_H_W,
-            timesteps_B_T=c_noise_B_1_T_1_1.squeeze(dim=[1, 3, 4]),  # Eq. 7 of https://arxiv.org/pdf/2206.00364.pdf
+            x_B_C_T_H_W=net_state_in_B_C_T_H_W.to(
+                **self.tensor_kwargs
+            ),  # Eq. 7 of https://arxiv.org/pdf/2206.00364.pdf
+            timesteps_B_T=c_noise_B_1_T_1_1.squeeze(dim=[1, 3, 4]).to(
+                **self.tensor_kwargs
+            ),  # Eq. 7 of https://arxiv.org/pdf/2206.00364.pdf
             **condition.to_dict(),
-        )
+        ).float()
 
         x0_pred_B_C_T_H_W = c_skip_B_1_T_1_1 * xt_B_C_T_H_W + c_out_B_1_T_1_1 * net_output_B_C_T_H_W
         if condition.is_video:
             # Set the first few frames to the ground truth frames. This will ensure that the loss is not computed for the first few frames.
-            x0_pred_B_C_T_H_W = condition.gt_frames * condition_video_mask + x0_pred_B_C_T_H_W * (
-                1 - condition_video_mask
-            )
+            x0_pred_B_C_T_H_W = condition.gt_frames.type_as(
+                x0_pred_B_C_T_H_W
+            ) * condition_video_mask + x0_pred_B_C_T_H_W * (1 - condition_video_mask)
 
         # get noise prediction based on sde
         eps_pred_B_C_T_H_W = (xt_B_C_T_H_W - x0_pred_B_C_T_H_W) / sigma_B_1_T_1_1
@@ -195,20 +165,27 @@ class Vid2VidModel(T2VModel):
         else:
             condition, uncondition = self.conditioner.get_condition_uncondition(data_batch)
 
-        # Do not use classifier free guidance on conditional frames.
-        # YB found that it leads to worse results.
-        uncondition.use_video_condition.fill_(True)
-
         is_image_batch = self.is_image_batch(data_batch)
         condition = condition.edit_data_type(DataType.IMAGE if is_image_batch else DataType.VIDEO)
         uncondition = uncondition.edit_data_type(DataType.IMAGE if is_image_batch else DataType.VIDEO)
         _, x0, _ = self.get_data_and_condition(data_batch)
-        _, condition, _, _ = self.broadcast_split_for_model_parallelsim(
-            x0, condition, None, None, is_train=False, num_conditional_frames=num_conditional_frames
+        # override condition with inference mode; num_conditional_frames used Here!
+        condition = condition.set_video_condition(
+            gt_frames=x0,
+            random_min_num_conditional_frames=self.config.min_num_conditional_frames,
+            random_max_num_conditional_frames=self.config.max_num_conditional_frames,
+            num_conditional_frames=num_conditional_frames,
         )
-        _, uncondition, _, _ = self.broadcast_split_for_model_parallelsim(
-            x0, uncondition, None, None, is_train=False, num_conditional_frames=num_conditional_frames
+        uncondition = uncondition.set_video_condition(
+            gt_frames=x0,
+            random_min_num_conditional_frames=self.config.min_num_conditional_frames,
+            random_max_num_conditional_frames=self.config.max_num_conditional_frames,
+            num_conditional_frames=num_conditional_frames,
         )
+        condition = condition.edit_for_inference(is_cfg_conditional=True)
+        uncondition = uncondition.edit_for_inference(is_cfg_conditional=False)
+        _, condition, _, _ = self.broadcast_split_for_model_parallelsim(x0, condition, None, None)
+        _, uncondition, _, _ = self.broadcast_split_for_model_parallelsim(x0, uncondition, None, None)
 
         if parallel_state.is_initialized():
             pass

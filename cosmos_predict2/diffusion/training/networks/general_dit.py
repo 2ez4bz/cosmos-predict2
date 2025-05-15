@@ -20,7 +20,6 @@ A general implementation of adaln-modulated VIT-like~(DiT) transformer for video
 from typing import List, Optional, Tuple
 
 import torch
-import pickle
 from einops import rearrange
 from torch import nn
 from torch.distributed import ProcessGroup, get_process_group_ranks
@@ -97,8 +96,8 @@ class GeneralDIT(WeightTrainingStat):
         pos_emb_cls: str = "sincos",
         pos_emb_learnable: bool = False,
         pos_emb_interpolation: str = "crop",
-        min_fps: int = 1,  # 1 for getty video
-        max_fps: int = 30,  # 120 for getty video but let's use 30
+        min_fps: int = 1,
+        max_fps: int = 30,
         use_adaln_lora: bool = False,
         adaln_lora_dim: int = 256,
         rope_h_extrapolation_ratio: float = 1.0,
@@ -109,10 +108,8 @@ class GeneralDIT(WeightTrainingStat):
         extra_w_extrapolation_ratio: float = 1.0,
         extra_t_extrapolation_ratio: float = 1.0,
         rope_enable_fps_modulation: bool = True,
-        **kwargs,
     ) -> None:
         super().__init__()
-        print(f"{kwargs=}")
         self.max_img_h = max_img_h
         self.max_img_w = max_img_w
         self.max_frames = max_frames

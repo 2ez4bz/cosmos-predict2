@@ -14,7 +14,7 @@
 # limitations under the License.
 
 from cosmos_predict2.diffusion.training.utils.checkpointer import MultiRankCheckpointer
-from cosmos_predict2.utils.fsdp_checkpointer import FSDPCheckpointer
+from cosmos_predict2.diffusion.checkpointers.dcp_checkpointer import DistributedCheckpointer
 from cosmos_predict2.utils.trainer import Trainer as BaseTrainer
 
 
@@ -24,6 +24,6 @@ class Trainer(BaseTrainer):
         if config.trainer.distributed_parallelism == "ddp":
             self.checkpointer = MultiRankCheckpointer(config.checkpoint, config.job, callbacks=self.callbacks)
         elif config.trainer.distributed_parallelism == "fsdp":
-            self.checkpointer = FSDPCheckpointer(config.checkpoint, config.job, callbacks=self.callbacks)
+            self.checkpointer = DistributedCheckpointer(config.checkpoint, config.job, callbacks=self.callbacks)
         else:
             raise ValueError(f"Unsupported distributed parallelism: {config.trainer.distributed_parallelism}")

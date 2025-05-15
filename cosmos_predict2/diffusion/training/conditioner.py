@@ -19,13 +19,13 @@ from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-from torch.distributed import ProcessGroup, all_gather, broadcast_object_list, get_process_group_ranks, get_world_size
+from torch.distributed import ProcessGroup
 
 from cosmos_predict2.diffusion.conditioner import GeneralConditioner
 from cosmos_predict2.diffusion.functional.batch_ops import batch_mul
-from cosmos_predict2.diffusion.training.context_parallel import split_inputs_cp
+from cosmos_predict2.diffusion.training.context_parallel import broadcast_split_tensor
 from cosmos_predict2.utils.misc import count_params
-from cosmos_predict2.diffusion.training.utils.context_parallel import broadcast
+from cosmos_predict2.diffusion.training.context_parallel import broadcast
 
 
 class DataType(Enum):
@@ -164,11 +164,6 @@ class BaseVideoCondition:
     data_type: DataType = DataType.VIDEO
     padding_mask: Optional[torch.Tensor] = None
     fps: Optional[torch.Tensor] = None
-    num_frames: Optional[torch.Tensor] = None
-    image_size: Optional[torch.Tensor] = None
-    scalar_feature: Optional[torch.Tensor] = None
-    trajectory: Optional[torch.Tensor] = None
-    frame_repeat: Optional[torch.Tensor] = None
 
     _is_broadcasted: bool = False
 
@@ -204,7 +199,7 @@ class BaseVideoCondition:
 
     def broadcast(self, process_group: torch.distributed.ProcessGroup) -> "BaseVideoCondition":
         """Broadcasts and splits the condition across the checkpoint parallelism group.
-        For most condition, such asT2VCondition, we do not need split.
+        For most condition, we do not need split.
 
         Args:
             process_group: The process group for broadcast and split
@@ -212,72 +207,146 @@ class BaseVideoCondition:
         Returns:
             A new BaseCondition instance with the broadcasted and split condition.
         """
+        if self.is_broadcasted:
+            return self
         return broadcast_condition(self, process_group)
 
 
 @dataclass
 class VideoExtendCondition(BaseVideoCondition):
     video_cond_bool: Optional[torch.Tensor] = None  # whether or not it conditioned on video
-    gt_latent: Optional[torch.Tensor] = None
-    condition_video_indicator: Optional[torch.Tensor] = None  # 1 for condition region
 
-    # condition_video_input_mask will concat to the input of network, along channel dim;
-    # Will be concat with the input tensor
-    condition_video_input_mask: Optional[torch.Tensor] = None
-    # condition_video_augment_sigma: (B, T) tensor of sigma value for the conditional input augmentation, only valid when apply_corruption_to_condition_region is "noise_with_sigma" or "noise_with_sigma_fixed"
-    condition_video_augment_sigma: Optional[torch.Tensor] = None
-    # pose conditional input, will be concat with the input tensor
-    condition_video_pose: Optional[torch.Tensor] = None
-
+    use_video_condition: bool = True
+    # the following two attributes are used to set the video condition; during training, inference
     gt_frames: Optional[torch.Tensor] = None
-    num_conditional_frames: Optional[torch.Tensor] = None
-    use_video_condition: bool = False
     condition_video_input_mask_B_C_T_H_W: Optional[torch.Tensor] = None
 
     def set_video_condition(
         self,
         gt_frames: torch.Tensor,
-        condition_video_input_mask_B_C_T_H_W: torch.Tensor,
-        num_conditional_frames: Optional[torch.Tensor] = None,
-    ):
+        random_min_num_conditional_frames: int,
+        random_max_num_conditional_frames: int,
+        num_conditional_frames: Optional[int] = None,
+    ) -> "VideoExtendCondition":
+        """
+        Sets the video conditioning frames for video-to-video generation.
+
+        This method creates a conditioning mask for the input video frames that determines
+        which frames will be used as context frames for generating new frames. The method
+        handles both image batches (T=1) and video batches (T>1) differently.
+
+        Args:
+            gt_frames: A tensor of ground truth frames with shape [B, C, T, H, W], where:
+                B = batch size
+                C = number of channels
+                T = number of frames
+                H = height
+                W = width
+
+            random_min_num_conditional_frames: Minimum number of frames to use for conditioning
+                when randomly selecting a number of conditioning frames.
+
+            random_max_num_conditional_frames: Maximum number of frames to use for conditioning
+                when randomly selecting a number of conditioning frames.
+
+            num_conditional_frames: Optional; If provided, all examples in the batch will use
+                exactly this many frames for conditioning. If None, a random number of frames
+                between random_min_num_conditional_frames and random_max_num_conditional_frames
+                will be selected for each example in the batch.
+
+        Returns:
+            A new Vid2VidCondition object with the gt_frames and conditioning mask set.
+            The conditioning mask (condition_video_input_mask_B_C_T_H_W) is a binary tensor
+            of shape [B, 1, T, H, W] where 1 indicates frames used for conditioning and 0
+            indicates frames to be generated.
+
+        Notes:
+            - For image batches (T=1), no conditioning frames are used (num_conditional_frames_B = 0).
+            - For video batches:
+                - If num_conditional_frames is provided, all examples use that fixed number of frames.
+                - Otherwise, each example randomly uses between random_min_num_conditional_frames and
+                random_max_num_conditional_frames frames.
+            - The mask marks the first N frames as conditioning frames (set to 1) for each example.
+        """
         kwargs = self.to_dict(skip_underscore=False)
         kwargs["gt_frames"] = gt_frames
+
+        # condition_video_input_mask_B_C_T_H_W
+        B, _, T, H, W = gt_frames.shape
+        condition_video_input_mask_B_C_T_H_W = torch.zeros(
+            B, 1, T, H, W, dtype=gt_frames.dtype, device=gt_frames.device
+        )
+        if T == 1:  # handle image batch
+            num_conditional_frames_B = torch.zeros(B, dtype=torch.int32)
+        else:  # handle video batch
+            if num_conditional_frames is not None:
+                num_conditional_frames_B = torch.ones(B, dtype=torch.int32) * num_conditional_frames
+            else:
+                num_conditional_frames_B = torch.randint(
+                    random_min_num_conditional_frames, random_max_num_conditional_frames + 1, size=(B,)
+                )
+        for idx in range(B):
+            condition_video_input_mask_B_C_T_H_W[idx, :, : num_conditional_frames_B[idx], :, :] += 1
+
         kwargs["condition_video_input_mask_B_C_T_H_W"] = condition_video_input_mask_B_C_T_H_W
-        kwargs["num_conditional_frames"] = num_conditional_frames
         return type(self)(**kwargs)
 
+    def broadcast(self, process_group: torch.distributed.ProcessGroup) -> "VideoExtendCondition":
+        if self.is_broadcasted:
+            return self
+        # extra efforts
+        gt_frames = self.gt_frames
+        condition_video_input_mask_B_C_T_H_W = self.condition_video_input_mask_B_C_T_H_W
+        kwargs = self.to_dict(skip_underscore=False)
+        kwargs["gt_frames"] = None
+        kwargs["condition_video_input_mask_B_C_T_H_W"] = None
+        new_condition = BaseVideoCondition.broadcast(
+            type(self)(**kwargs),
+            process_group,
+        )
 
-@dataclass
-class VideoLatentDiffusionDecoderCondition(BaseVideoCondition):
-    # latent_condition will concat to the input of network, along channel dim;
-    # cfg will make latent_condition all zero padding.
-    latent_condition: Optional[torch.Tensor] = None
-    latent_condition_sigma: Optional[torch.Tensor] = None
+        kwargs = new_condition.to_dict(skip_underscore=False)
+        _, _, T, _, _ = gt_frames.shape
+        if process_group is not None:
+            if T > 1 and process_group.size() > 1:
+                gt_frames = broadcast_split_tensor(gt_frames, seq_dim=2, process_group=process_group)
+                condition_video_input_mask_B_C_T_H_W = broadcast_split_tensor(
+                    condition_video_input_mask_B_C_T_H_W, seq_dim=2, process_group=process_group
+                )
+        kwargs["gt_frames"] = gt_frames
+        kwargs["condition_video_input_mask_B_C_T_H_W"] = condition_video_input_mask_B_C_T_H_W
+        return type(self)(**kwargs)
 
-    def get_condition_for_cp(self, cp_group):
-        self.latent_condition = split_inputs_cp(x=self.latent_condition, seq_dim=2, cp_group=cp_group)
-        self.latent_condition_sigma = split_inputs_cp(x=self.latent_condition_sigma, seq_dim=2, cp_group=cp_group)
+class Vid2VidConditionV2(VideoExtendCondition):
+    """
+    compared to Vid2VidCondition, this class apply zero frames when use_video_condition is False~(unconditional generation in cfg)
+    in the case, we do zero-out conditional frames in the video condition
+    """
 
-
-class VideoConditioner(GeneralConditioner):
-    def forward(
+    def set_video_condition(
         self,
-        batch: Dict,
-        override_dropout_rate: Optional[Dict[str, float]] = None,
-    ) -> BaseVideoCondition:
-        output = super()._forward(batch, override_dropout_rate)
-        return BaseVideoCondition(**output)
+        gt_frames: torch.Tensor,
+        random_min_num_conditional_frames: int,
+        random_max_num_conditional_frames: int,
+        num_conditional_frames: Optional[int] = None,
+    ) -> "Vid2VidConditionV2":
+        num_conditional_frames = 0 if not self.use_video_condition else num_conditional_frames
+        return super().set_video_condition(
+            gt_frames=gt_frames,
+            random_min_num_conditional_frames=random_min_num_conditional_frames,
+            random_max_num_conditional_frames=random_max_num_conditional_frames,
+            num_conditional_frames=num_conditional_frames,
+        )
 
-
-class VideoDiffusionDecoderConditioner(GeneralConditioner):
-    def forward(
-        self,
-        batch: Dict,
-        override_dropout_rate: Optional[Dict[str, float]] = None,
-    ) -> VideoLatentDiffusionDecoderCondition:
-        output = super()._forward(batch, override_dropout_rate)
-        return VideoLatentDiffusionDecoderCondition(**output)
-
+    def edit_for_inference(self, is_cfg_conditional: bool = True) -> "Vid2VidConditionV2":
+        del is_cfg_conditional
+        _condition = super().set_video_condition(
+            gt_frames=self.gt_frames,
+            random_min_num_conditional_frames=0,
+            random_max_num_conditional_frames=0,
+            num_conditional_frames=1,
+        )
+        return _condition
 
 class VideoExtendConditioner(GeneralConditioner):
     def forward(
@@ -288,93 +357,14 @@ class VideoExtendConditioner(GeneralConditioner):
         output = super()._forward(batch, override_dropout_rate)
         return VideoExtendCondition(**output)
 
-
-class VideoConditionerWithTraingOnlyEmb(GeneralConditioner):
-    def get_condition_uncondition(
-        self,
-        data_batch: Dict,
-    ) -> Tuple[Any, Any]:
-        """
-        Processes the provided data batch to generate two sets of outputs: conditioned and unconditioned. This method
-        manipulates the dropout rates of embedders to simulate two scenarios — one where all conditions are applied
-        (conditioned), and one where they are removed or reduced to the minimum (unconditioned).
-
-        This method first sets the dropout rates to zero for the conditioned scenario to fully apply the embedders' effects.
-        For the unconditioned scenario, it sets the dropout rates to 1 (or to 0 if the initial unconditional dropout rate
-        is insignificant) to minimize the embedders' influences, simulating an unconditioned generation.
-
-        Parameters:
-            data_batch (Dict): The input data batch that contains all necessary information for embedding processing. The
-                            data is expected to match the required format and keys expected by the embedders.
-
-        Returns:
-            Tuple[Any, Any]: A tuple containing two condition:
-                - The first one contains the outputs with all embedders fully applied (conditioned outputs).
-                - The second one contains the outputs with embedders minimized or not applied (unconditioned outputs).
-        """
-        cond_dropout_rates, dropout_rates = {}, {}
-        for emb_name, embedder in self.embedders.items():
-            if isinstance(embedder, FrameRepeatAttr):
-                cond_dropout_rates[emb_name] = 1.0
-            else:
-                cond_dropout_rates[emb_name] = 0.0
-            dropout_rates[emb_name] = 1.0 if embedder.dropout_rate > 1e-4 else 0.0
-
-        condition: Any = self(data_batch, override_dropout_rate=cond_dropout_rates)
-        un_condition: Any = self(data_batch, override_dropout_rate=dropout_rates)
-        return condition, un_condition
-
+class VideoExtendConditionerV2(GeneralConditioner):
     def forward(
         self,
         batch: Dict,
         override_dropout_rate: Optional[Dict[str, float]] = None,
-    ) -> BaseVideoCondition:
+    ) -> Vid2VidConditionV2:
         output = super()._forward(batch, override_dropout_rate)
-        return BaseVideoCondition(**output)
-
-
-class VideoExtendConditionerWithTraingOnlyEmb(VideoConditionerWithTraingOnlyEmb):
-    def forward(
-        self,
-        batch: Dict,
-        override_dropout_rate: Optional[Dict[str, float]] = None,
-    ) -> VideoExtendCondition:
-        output = super()._forward(batch, override_dropout_rate)
-        return VideoExtendCondition(**output)
-
-
-@dataclass
-class BaseWithCtrlCondition(VideoExtendCondition):
-    control_input_canny: Optional[torch.Tensor] = None
-    control_input_blur: Optional[torch.Tensor] = None
-    control_input_canny_blur: Optional[torch.Tensor] = None
-    control_input_depth: Optional[torch.Tensor] = None
-    control_input_segmentation: Optional[torch.Tensor] = None
-    control_input_depth_segmentation: Optional[torch.Tensor] = None
-    control_input_mask: Optional[torch.Tensor] = None
-    control_input_human_kpts: Optional[torch.Tensor] = None
-    control_input_upscale: Optional[torch.Tensor] = None
-    control_input_identity: Optional[torch.Tensor] = None
-    control_input_multi: Optional[torch.Tensor] = None
-    base_model: Optional[torch.nn.Module] = None
-    hint_key: Optional[str] = None
-    control_weight: Optional[float] = 1.0
-    num_layers_to_use: Optional[int] = -1
-
-
-class VideoConditionerWithCtrl(VideoExtendConditioner):
-    def forward(
-        self,
-        batch: Dict,
-        override_dropout_rate: Optional[Dict[str, float]] = None,
-    ) -> BaseWithCtrlCondition:
-        output = super()._forward(batch, override_dropout_rate)
-        output["hint_key"] = batch["hint_key"]
-        if "control_weight" in batch:
-            output["control_weight"] = batch["control_weight"]
-        if "num_layers_to_use" in batch:
-            output["num_layers_to_use"] = batch["num_layers_to_use"]
-        return BaseWithCtrlCondition(**output)
+        return Vid2VidConditionV2(**output)
 
 
 class BooleanFlag(AbstractEmbModel):

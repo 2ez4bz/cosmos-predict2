@@ -24,8 +24,7 @@ import torch
 import torch.nn as nn
 from torch.distributed import ProcessGroup
 
-from cosmos_predict2.diffusion.training.context_parallel import broadcast_split_tensor
-from cosmos_predict2.diffusion.training.utils.context_parallel import broadcast
+from cosmos_predict2.diffusion.training.context_parallel import broadcast_split_tensor, broadcast
 from cosmos_predict2.utils import log
 from cosmos_predict2.utils.lazy_config import instantiate
 

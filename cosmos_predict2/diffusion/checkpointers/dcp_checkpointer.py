@@ -3,13 +3,42 @@ from abc import ABC, abstractmethod
 from typing import Optional
 
 import torch
+import enum
+import functools
+import multiprocessing
+import os
+import time
+import attrs
+from collections import namedtuple
+from multiprocessing import get_context
+from typing import Any, Dict, List, Set, Tuple, Union
 
+import torch.distributed
+import torch.distributed.checkpoint as dcp
+from torch import nn
+from torch.distributed.checkpoint import FileSystemReader, FileSystemWriter
+from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner, DefaultSavePlanner
+from torch.distributed.checkpoint.state_dict import (
+    StateDictOptions,
+    get_model_state_dict,
+    get_optimizer_state_dict,
+    set_model_state_dict,
+    set_optimizer_state_dict,
+)
+from torch.distributed.checkpoint.stateful import Stateful
+
+from cosmos_predict2.utils import log
+from cosmos_predict2.utils.config import CheckpointConfig as BaseCheckpointConfig
+from cosmos_predict2.utils.config import make_freezable
 from cosmos_predict2.utils import callback, distributed, log, misc
 from cosmos_predict2.utils.config import CheckpointConfig, JobConfig
 from cosmos_predict2.utils.easy_io import easy_io
-from cosmos_predict2.utils.fsdp_optim_fix import scatter_full_optim_state_dict
 from cosmos_predict2.utils.model import Model
 
+@make_freezable
+@attrs.define(slots=False)
+class CheckpointConfig(BaseCheckpointConfig):
+    load_ema_to_reg: bool = False
 
 class AbstractCheckpointer(ABC):
     """The checkpointer class. Supports checkpoint saving/loading to both local disk or object store."""
@@ -126,29 +155,6 @@ class AbstractCheckpointer(ABC):
             raise FileNotFoundError(f"File not found (object store): {checkpoint_path}")
 
 
-import enum
-import functools
-import multiprocessing
-import os
-import time
-from collections import namedtuple
-from multiprocessing import get_context
-from typing import Any, Dict, List, Set, Tuple, Union
-
-import torch
-import torch.distributed
-import torch.distributed.checkpoint as dcp
-from torch import nn
-from torch.distributed.checkpoint import FileSystemReader, FileSystemWriter
-from torch.distributed.checkpoint.default_planner import DefaultLoadPlanner, DefaultSavePlanner
-from torch.distributed.checkpoint.state_dict import (
-    StateDictOptions,
-    get_model_state_dict,
-    get_optimizer_state_dict,
-    set_model_state_dict,
-    set_optimizer_state_dict,
-)
-from torch.distributed.checkpoint.stateful import Stateful
 
 StateDictItemPath = namedtuple("StateDictItemPath", ["state_dict", "save_path"])
 
@@ -393,7 +399,6 @@ class DistributedCheckpointer(AbstractCheckpointer):
             self._check_checkpoint_exists(checkpoint_path)
             for key in resume_keys:
                 cur_key_ckpt_full_path = os.path.join(checkpoint_path, key)
-                print(f"{cur_key_ckpt_full_path=}")
                 log.critical(f"Start loading checkpoint from {checkpoint_path}")
                 storage_reader = self.get_storage_reader(cur_key_ckpt_full_path)
                 torch.distributed.barrier()
@@ -402,12 +407,11 @@ class DistributedCheckpointer(AbstractCheckpointer):
                     log.info("- Loading the model...")
                     _model_wrapper = ModelWrapper(model)
                     _state_dict = _model_wrapper.state_dict()
-                    # TODO: (qsh 2025-01-23) set flag `allow_partial_load`
-                    # dcp.load(
-                    #     _state_dict,
-                    #     storage_reader=storage_reader,
-                    #     planner=DefaultLoadPlanner(allow_partial_load=True),
-                    # )
+                    dcp.load(
+                        _state_dict,
+                        storage_reader=storage_reader,
+                        planner=DefaultLoadPlanner(allow_partial_load=True),
+                    )
                     _model_wrapper.load_state_dict(_state_dict)
                 elif key == "optim":
                     log.info("- Loading the optimizer...")

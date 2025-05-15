@@ -15,8 +15,7 @@
 
 import omegaconf
 
-from cosmos_predict2.diffusion.training.module.pretrained_vae import VideoJITTokenizer
-from cosmos_predict2.diffusion.module.wan2pt1 import Wan2pt1VAEInterface
+from cosmos_predict2.diffusion.training.module.wan2pt1 import Wan2pt1VAEInterface
 from cosmos_predict2.utils.lazy_config import LazyCall as L
 
 TOKENIZER_OPTIONS = {}
@@ -29,32 +28,6 @@ def tokenizer_register(key):
 
     return decorator
 
-
-@tokenizer_register("cosmos_diffusion_tokenizer_comp8x8x8")
-def get_cosmos_tokenizer_comp8x8x8(
-    resolution: str,
-    chunk_duration: int,
-) -> omegaconf.dictconfig.DictConfig:
-    assert resolution in ["512", "720"]
-
-    pixel_chunk_duration = chunk_duration
-    temporal_compression_factor = 8
-    spatial_compression_factor = 8
-
-    return L(VideoJITTokenizer)(
-        name="cosmos_diffusion_tokenizer_comp8x8x8",
-        enc_fp="checkpoints/Cosmos-Tokenize1-CV8x8x8-720p/encoder.jit",
-        dec_fp="checkpoints/Cosmos-Tokenize1-CV8x8x8-720p/decoder.jit",
-        mean_std_fp="checkpoints/Cosmos-Tokenize1-CV8x8x8-720p/mean_std.pt",
-        latent_ch=16,
-        is_bf16=True,
-        pixel_chunk_duration=pixel_chunk_duration,
-        temporal_compression_factor=temporal_compression_factor,
-        spatial_compression_factor=spatial_compression_factor,
-        spatial_resolution=resolution,
-    )
-
-
 @tokenizer_register("wan2pt1_tokenizer")
 def get_wan2pt1_tokenizer() -> omegaconf.dictconfig.DictConfig:
-    return L(Wan2pt1VAEInterface)(name="wan2pt1_tokenizer")
+    return L(Wan2pt1VAEInterface)(name="wan2pt1_tokenizer", load_path='checkpoints/Wan-AI/Wan2.1-T2V-1.3B/Wan2.1_VAE.pth')

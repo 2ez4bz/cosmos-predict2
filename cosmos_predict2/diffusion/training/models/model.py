@@ -21,14 +21,11 @@ from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 import amp_C
 import numpy as np
 import torch
-import torch.nn.functional as F
 from einops import rearrange
 from megatron.core import parallel_state
 from torch import Tensor
-from torch.distributed import ProcessGroup, broadcast_object_list, get_process_group_ranks
 from torch.distributed._composable.fsdp import FSDPModule, fully_shard
 from torch.distributed._tensor.api import DTensor
-from torch.distributed.utils import _verify_param_shape_across_processes
 from torch.nn.modules.module import _IncompatibleKeys
 
 from cosmos_predict2.diffusion.conditioner import CosmosCondition  # TODO:
@@ -47,11 +44,8 @@ from cosmos_predict2.diffusion.training.utils.fsdp_helper import hsdp_device_mes
 from cosmos_predict2.diffusion.training.utils.optim_instantiate import get_base_scheduler
 from cosmos_predict2.diffusion.training.utils.torch_futrure import clip_grad_norm_
 from cosmos_predict2.diffusion.types import DenoisePrediction
-
-# from cosmos_predict2.diffusion.training.models.model_image import CosmosCondition
-# from cosmos_predict2.diffusion.training.models.model_image import DiffusionModel as ImageModel
-# from cosmos_predict2.diffusion.training.models.model_image import diffusion_fsdp_class_decorator
-from cosmos_predict2.utils import distributed, log, misc
+from cosmos_predict2.diffusion.training.context_parallel import broadcast, broadcast_split_tensor
+from cosmos_predict2.utils import log, misc
 from cosmos_predict2.utils.ema import FastEmaModelUpdater
 from cosmos_predict2.utils.lazy_config import LazyDict
 from cosmos_predict2.utils.lazy_config import instantiate as lazy_instantiate
@@ -65,71 +59,6 @@ multi_tensor_scale_impl = amp_C.multi_tensor_scale
 # to avoid apply normalization or augment image dimension multiple times
 # It is due to we do not have normalization and augment image dimension in the dataloader and move it to the model
 IS_PREPROCESSED_KEY = "is_preprocessed"
-
-
-def robust_broadcast(tensor: torch.Tensor, src: int, pg, is_check_shape: bool = False) -> torch.Tensor:
-    """
-    Perform a robust broadcast operation that works regardless of tensor shapes on different ranks.
-
-    Args:
-        tensor (torch.Tensor): The tensor to broadcast (on src rank) or receive (on other ranks).
-        src (int): The source rank for the broadcast. Defaults to 0.
-
-    Returns:
-        torch.Tensor: The broadcasted tensor on all ranks.
-    """
-    # First, broadcast the shape of the tensor
-    if distributed.get_rank() == src:
-        shape = torch.tensor(tensor.shape).cuda()
-    else:
-        shape = torch.empty(tensor.dim(), dtype=torch.long).cuda()
-    if is_check_shape:
-        _verify_param_shape_across_processes(pg, [shape])
-    torch.distributed.broadcast(shape, src, group=pg)
-
-    # Resize the tensor on non-src ranks if necessary
-    if distributed.get_rank() != src:
-        tensor = tensor.new_empty(shape.tolist()).type_as(tensor)
-
-    # Now broadcast the tensor data
-    torch.distributed.broadcast(tensor, src, group=pg)
-
-    return tensor
-
-
-def broadcast_split_tensor(
-    tensor: torch.Tensor,
-    seq_dim: int,
-    process_group: Optional[ProcessGroup] = None,
-) -> torch.Tensor:
-    """
-    Broadcast the tensor from the minimum rank in the specified group(s).
-    """
-    if tensor is None:
-        return tensor
-    min_rank = min(get_process_group_ranks(process_group))
-    tensor = robust_broadcast(tensor, min_rank, process_group)
-    return split_inputs_cp(tensor, seq_dim, process_group)
-
-
-def broadcast(
-    item: torch.Tensor | str | None, process_group: Optional[ProcessGroup] = None
-) -> torch.Tensor | str | None:
-    """
-    Broadcast the item from the minimum rank in the specified group(s).
-    """
-    if process_group is None:
-        return item
-
-    min_rank = min(get_process_group_ranks(process_group))
-    if isinstance(item, torch.Tensor):  # assume the device is cuda
-        item = robust_broadcast(item, min_rank, process_group)
-    elif item is not None:
-        broadcastable_list = [item]
-        broadcast_object_list(broadcastable_list, min_rank, group=process_group)
-        item = broadcastable_list[0]
-    return item
-
 
 class DiffusionModel(Model):
     def __init__(self, config, **kwargs):
@@ -353,7 +282,7 @@ class DiffusionModel(Model):
 
         # Broadcast and split the input data and condition for model parallelism
         x0_B_C_T_H_W, condition, epsilon_B_C_T_H_W, sigma_B_T = self.broadcast_split_for_model_parallelsim(
-            x0_B_C_T_H_W, condition, epsilon_B_C_T_H_W, sigma_B_T, is_train=True
+            x0_B_C_T_H_W, condition, epsilon_B_C_T_H_W, sigma_B_T
         )
         output_batch, kendall_loss, _, _ = self.compute_loss_with_epsilon_and_sigma(
             x0_B_C_T_H_W, condition, epsilon_B_C_T_H_W, sigma_B_T
@@ -375,7 +304,7 @@ class DiffusionModel(Model):
         return None
 
     def broadcast_split_for_model_parallelsim(
-        self, x0_B_C_T_H_W, condition, epsilon_B_C_T_H_W, sigma_B_T, is_train=True
+        self, x0_B_C_T_H_W, condition, epsilon_B_C_T_H_W, sigma_B_T
     ):
         """
         Broadcast and split the input data and condition for model parallelism.
@@ -510,8 +439,8 @@ class DiffusionModel(Model):
         condition = condition.edit_data_type(DataType.IMAGE if is_image_batch else DataType.VIDEO)
         uncondition = uncondition.edit_data_type(DataType.IMAGE if is_image_batch else DataType.VIDEO)
         _, x0, _ = self.get_data_and_condition(data_batch)
-        _, condition, _, _ = self.broadcast_split_for_model_parallelsim(x0, condition, None, None, is_train=False)
-        _, uncondition, _, _ = self.broadcast_split_for_model_parallelsim(x0, uncondition, None, None, is_train=False)
+        _, condition, _, _ = self.broadcast_split_for_model_parallelsim(x0, condition, None, None)
+        _, uncondition, _, _ = self.broadcast_split_for_model_parallelsim(x0, uncondition, None, None)
 
         # For inference, check if parallel_state is initialized
         if parallel_state.is_initialized():
@@ -606,7 +535,7 @@ class DiffusionModel(Model):
         """
         save generated videos
         """
-        raw_data, x0, condition = self.get_data_and_condition(data)
+        raw_data, x0, _ = self.get_data_and_condition(data)
         guidance = data["guidance"]
         data = misc.to(data, **self.tensor_kwargs)
         sample = self.generate_samples_from_batch(
@@ -687,6 +616,14 @@ class DiffusionModel(Model):
                 data_batch[input_key] = data_batch[input_key].to(**self.tensor_kwargs) / 127.5 - 1.0
                 data_batch[IS_PREPROCESSED_KEY] = True
 
+            if self.config.resize_online:
+                expected_length = self.tokenizer.get_pixel_num_frames(self.config.state_t)
+                if data_batch[input_key].shape[2] != expected_length:
+                    H, W = data_batch[input_key].shape[3:]
+                    data_batch[input_key] = torch.nn.functional.interpolate(
+                        data_batch[input_key], size=(expected_length, H, W), mode="trilinear", align_corners=False
+                    )
+
     def _augment_image_dim_inplace(self, data_batch: dict[str, Tensor], input_key: str = None) -> None:
         input_key = self.input_image_key if input_key is None else input_key
         if input_key in data_batch:
@@ -706,7 +643,6 @@ class DiffusionModel(Model):
         if self.config.ema.enabled:
             ema_state_dict = self.net_ema.state_dict(prefix="net_ema.")
             net_state_dict.update(ema_state_dict)
-        net_state_dict["trained_data_record"] = self.trained_data_record
         return net_state_dict
 
     def load_state_dict(self, state_dict: Mapping[str, Any], strict: bool = True, assign: bool = False):
@@ -770,32 +706,8 @@ class DiffusionModel(Model):
             return 0.0
         return (1 - 1 / (iteration + 1)) ** (self.ema_exp_coefficient + 1)
 
-    def on_train_start(self, memory_format: torch.memory_format = torch.preserve_format) -> None:
-        if self.config.ema.enabled:
-            self.net_ema.to(dtype=torch.float32)
-        if hasattr(self.tokenizer, "reset_dtype"):
-            self.tokenizer.reset_dtype()
-        self.net = self.net.to(memory_format=memory_format, **self.tensor_kwargs)
-
-        if hasattr(self.config, "use_torch_compile") and self.config.use_torch_compile:  # compatible with old config
-            if torch.__version__ < "2.3":
-                log.warning(
-                    "torch.compile in Pytorch version older than 2.3 doesn't work well with activation checkpointing.\n"
-                    "It's very likely there will be no significant speedup from torch.compile.\n"
-                    "Please use at least 24.04 Pytorch container, or imaginaire4:v7 container."
-                )
-            # Increasing cache size. It's required because of the model size and dynamic input shapes resulting in
-            # multiple different triton kernels. For 28 TransformerBlocks, the cache limit of 256 should be enough for
-            # up to 9 different input shapes, as 28*9 < 256. If you have more Blocks or input shapes, and you observe
-            # graph breaks at each Block (detectable with torch._dynamo.explain) or warnings about
-            # exceeding cache limit, you may want to increase this size.
-            # Starting with 24.05 Pytorch container, the default value is 256 anyway.
-            # You can read more about it in the comments in Pytorch source code under path torch/_dynamo/cache_size.py.
-            torch._dynamo.config.accumulated_cache_size_limit = 256
-            # dynamic=False means that a separate kernel is created for each shape. It incurs higher compilation costs
-            # at initial iterations, but can result in more specialized and efficient kernels.
-            # dynamic=True currently throws errors in pytorch 2.3.
-            self.net = torch.compile(self.net, dynamic=False, disable=not self.config.use_torch_compile)
+    def model_param_stats(self) -> Dict[str, int]:
+        return {"total_learnable_param_num": self._param_count}
 
     def is_image_batch(self, data_batch: dict[str, Tensor]) -> bool:
         """We hanlde two types of data_batch. One comes from a joint_dataloader where "dataset_name" can be used to differenciate image_batch and video_batch.

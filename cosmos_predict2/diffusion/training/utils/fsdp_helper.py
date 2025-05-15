@@ -15,84 +15,9 @@
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from functools import partial
-
-import torch
-from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
-    CheckpointImpl,
-    apply_activation_checkpointing,
-    checkpoint_wrapper,
-)
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
-from torch.distributed.fsdp._runtime_utils import (
-    _post_forward,
-    _post_forward_reshard,
-    _pre_forward,
-    _pre_forward_unshard,
-    _root_pre_forward,
-)
-from torch.distributed.utils import _p_assert
 
 from cosmos_predict2.utils import distributed, log
-
-
-def apply_fsdp_checkpointing(model, list_block_cls):
-    """apply activation checkpointing to model
-    returns None as model is updated directly
-    """
-    log.critical("--> applying fdsp activation checkpointing...")
-    non_reentrant_wrapper = partial(
-        checkpoint_wrapper,
-        # offload_to_cpu=False,
-        checkpoint_impl=CheckpointImpl.NO_REENTRANT,
-    )
-
-    def check_fn(submodule):
-        result = False
-        for block_cls in list_block_cls:
-            if isinstance(submodule, block_cls):
-                result = True
-                break
-        return result
-
-    apply_activation_checkpointing(model, checkpoint_wrapper_fn=non_reentrant_wrapper, check_fn=check_fn)
-
-
-@contextmanager
-def possible_fsdp_scope(
-    model: torch.nn.Module,
-):
-    enabled = isinstance(model, FSDP)
-    if enabled:
-        assert not torch.is_grad_enabled(), "FSDP context should be entered with grad disabled"
-        handle = model._handle
-        args, kwargs = [0], dict(dummy=0)
-        with torch.autograd.profiler.record_function("FullyShardedDataParallel.possible_fsdp_scope"):
-            args, kwargs = _root_pre_forward(model, model, args, kwargs)
-            unused = None
-            args, kwargs = _pre_forward(
-                model,
-                handle,
-                _pre_forward_unshard,
-                model._fsdp_wrapped_module,
-                args,
-                kwargs,
-            )
-            if handle:
-                _p_assert(
-                    handle.flat_param.device == model.compute_device,
-                    "Expected `FlatParameter` to be on the compute device "
-                    f"{model.compute_device} but got {handle.flat_param.device}",
-                )
-    try:
-        yield None
-    finally:
-        if enabled:
-            output = {"output": 1}
-            _post_forward(model, handle, _post_forward_reshard, model, unused, output)
-
 
 def hsdp_device_mesh(replica_group_size=None, sharding_group_size=None, device=None):
     """

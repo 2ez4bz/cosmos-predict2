@@ -72,10 +72,10 @@ dataloader_val = L(DataLoader)(
 video2world_2b_example_hdvila = LazyDict(
     dict(
         defaults=[
-            {"override /net": "cosmos_predict2_net_2b"},
+            {"override /net": "cosmos_predict2_net_v2w_2b"},
             {"override /conditioner": "video_prediction_conditioner"},
             {"override /ckpt_klass": "dcp"},
-            {"override /checkpoint": "local"},  # TODO:
+            {"override /checkpoint": "local"},
             {"override /tokenizer": "wan2pt1_tokenizer"},
             "_self_",
         ],
@@ -85,22 +85,20 @@ video2world_2b_example_hdvila = LazyDict(
             name="video2world_2b_example_hdvila",
         ),
         optimizer=dict(
-            lr=2 ** (-14.0),  # 2**(-14.3) approx 6e-5
+            lr=2 ** (-14.0),
             weight_decay=0.1,
             betas=[0.9, 0.99],
             eps=1e-08,
         ),
-        # TODO: begin
         checkpoint=dict(
             save_iter=200,
             # save_iter=1,
             broadcast_via_filesystem=False,
-            load_path="checkpoints/Cosmos-Predict2-2B-Video2World_dcp",
+            load_path="checkpoints/Cosmos-Predict2-2B-Video2World",
             load_training_state=False,
             strict_resume=False,
             keys_not_to_resume=[],
         ),
-        # TODO: end
         trainer=dict(
             max_iter=2000,
             distributed_parallelism="fsdp",
@@ -144,11 +142,87 @@ video2world_2b_example_hdvila = LazyDict(
     )
 )
 
+video2world_14b_example_hdvila = LazyDict(
+    dict(
+        defaults=[
+            {"override /net": "cosmos_predict2_net_v2w_14b"},
+            {"override /conditioner": "video_prediction_conditioner_v2"},
+            {"override /ckpt_klass": "dcp"},
+            {"override /checkpoint": "local"},
+            {"override /tokenizer": "wan2pt1_tokenizer"},
+            "_self_",
+        ],
+        job=dict(
+            project="posttraining",
+            group="diffusion_video2world",
+            name="video2world_14b_example_hdvila",
+        ),
+        optimizer=dict(
+            lr=2 ** (-14.5),
+            weight_decay=0.2,
+            betas=[0.9, 0.99],
+            eps=1e-08,
+        ),
+        checkpoint=dict(
+            save_iter=200,
+            # save_iter=1,
+            broadcast_via_filesystem=False,
+            load_path="checkpoints/Cosmos-Predict2-14B-Video2World",
+            load_training_state=False,
+            strict_resume=False,
+            keys_not_to_resume=[],
+        ),
+        trainer=dict(
+            max_iter=2000,
+            distributed_parallelism="fsdp",
+            logging_iter=200,
+            callbacks=dict(
+                grad_clip=L(GradClip)(),
+                low_prec=L(LowPrecisionCallback)(config=PLACEHOLDER, trainer=PLACEHOLDER, update_iter=1),
+                iter_speed=L(IterSpeed)(
+                    every_n=10,
+                    hit_thres=0,
+                ),
+                progress_bar=L(ProgressBarCallback)(),
+            ),
+        ),
+        model_parallel=dict(
+            sequence_parallel=False,
+            tensor_model_parallel_size=1,
+            context_parallel_size=4,
+        ),
+        model=dict(
+            loss_reduce="mean",
+            ema=dict(
+                enabled=True,
+            ),
+            fsdp_shard_size=32,
+            net=L(VideoExtendGeneralDIT)(),
+            adjust_video_noise=True,
+            state_t=20,
+            resolution="480",
+            min_num_conditional_frames=1,
+            max_num_conditional_frames=2,
+        ),
+        model_obj=L(Vid2VidModel)(config=PLACEHOLDER),
+        # warming up for first 2500 steps~(when resume from 310000)
+        scheduler=dict(
+            warm_up_steps=[2000],
+            cycle_lengths=[300000],
+            f_start=[1.0e-6],
+            f_max=[1.0],
+            f_min=[1.0],
+        ),
+        dataloader_train=dataloader_train,
+    )
+)
+
 
 def register_experiments(cs):
     # Register the experiments
     for _item in [
         video2world_2b_example_hdvila,
+        video2world_14b_example_hdvila
     ]:
         experiment_name = _item["job"]["name"]
         log.info(f"Registering experiment: {experiment_name}")
