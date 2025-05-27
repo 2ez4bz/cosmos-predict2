@@ -274,7 +274,7 @@ class DiffusionV2WModel(DiffusionT2WModel):
 
         return x0_B_C_T_H_W, condition, epsilon_B_C_T_H_W, sigma_B_T
 
-    def denoise(self, xt_B_C_T_H_W: torch.Tensor, sigma: torch.Tensor, condition):
+    def denoise(self, xt_B_C_T_H_W: torch.Tensor, sigma: torch.Tensor, condition, use_cuda_graphs: bool = False,):
         """
         Performs denoising on the input noise data, noise level, and condition
 
@@ -282,6 +282,7 @@ class DiffusionV2WModel(DiffusionT2WModel):
             xt (torch.Tensor): The input noise data.
             sigma (torch.Tensor): The noise level.
             condition (T2VCondition): conditional information, generated from self.conditioner
+            use_cuda_graphs (bool, optional): Whether to use CUDA Graphs for inference. Defaults to False.
 
         Returns:
             DenoisePrediction: The denoised prediction, it includes clean data predicton (x0), \
@@ -349,6 +350,7 @@ class DiffusionV2WModel(DiffusionT2WModel):
             timesteps_B_T=c_noise_B_1_T_1_1.squeeze(dim=[1, 3, 4]).to(
                 **self.tensor_kwargs
             ),  # Eq. 7 of https://arxiv.org/pdf/2206.00364.pdf
+            use_cuda_graphs=use_cuda_graphs,
             **condition.to_dict(),
         ).float()
 
@@ -372,6 +374,7 @@ class DiffusionV2WModel(DiffusionT2WModel):
         data_batch: Dict,
         guidance: float = 1.5,
         is_negative_prompt: bool = False,
+        use_cuda_graphs: bool = False,
     ) -> Callable:
         """
         Generates a callable function `x0_fn` based on the provided data batch and guidance factor.
@@ -381,7 +384,8 @@ class DiffusionV2WModel(DiffusionT2WModel):
         Args:
         - data_batch (Dict): A batch of data used for conditioning. The format and content of this dictionary should align with the expectations of the `self.conditioner`
         - guidance (float, optional): A scalar value that modulates the influence of the conditioned state relative to the unconditioned state in the output. Defaults to 1.5.
-        - is_negative_prompt (bool): use negative prompt t5 in uncondition if true
+        - is_negative_prompt (bool, optional): use negative prompt t5 in uncondition if True. Defaults to False.
+        - use_cuda_graphs (bool, optional): Whether to use CUDA Graphs for inference. Defaults to False.
 
         Returns:
         - Callable: A function `x0_fn(noise_x, sigma)` that takes two arguments, `noise_x` and `sigma`, and return x0 predictoin
@@ -431,8 +435,8 @@ class DiffusionV2WModel(DiffusionT2WModel):
             ), "parallel_state is not initialized, context parallel should be turned off."
 
         def x0_fn(noise_x: torch.Tensor, sigma: torch.Tensor) -> torch.Tensor:
-            cond_x0 = self.denoise(noise_x, sigma, condition).x0
-            uncond_x0 = self.denoise(noise_x, sigma, uncondition).x0
+            cond_x0 = self.denoise(noise_x, sigma, condition, use_cuda_graphs=use_cuda_graphs).x0
+            uncond_x0 = self.denoise(noise_x, sigma, uncondition, use_cuda_graphs=use_cuda_graphs).x0
             raw_x0 = cond_x0 + guidance * (cond_x0 - uncond_x0)
             # import ipdb
 
@@ -458,6 +462,7 @@ class DiffusionV2WModel(DiffusionT2WModel):
         num_steps: int = 35,
         solver_option: str = "2ab",
         x_sigma_max: Optional[torch.Tensor] = None,
+        use_cuda_graphs: bool = False,
     ) -> torch.Tensor:
         """
         Generate samples from the batch. Based on given batch, it will automatically determine whether to generate image or video samples.
@@ -471,6 +476,7 @@ class DiffusionV2WModel(DiffusionT2WModel):
             is_negative_prompt (bool): use negative prompt t5 in uncondition if true
             num_steps (int): number of steps for the diffusion process
             solver_option (str): differential equation solver option, default to "2ab"~(mulitstep solver)
+            use_cuda_graphs (bool, optional): Whether to use CUDA Graphs for inference. Defaults to False.
         """
         self._normalize_video_databatch_inplace(data_batch)
         input_key = "video"
@@ -485,7 +491,7 @@ class DiffusionV2WModel(DiffusionT2WModel):
                 _W // self.tokenizer.spatial_compression_factor,
             ]
 
-        x0_fn = self.get_x0_fn_from_batch(data_batch, guidance, is_negative_prompt=is_negative_prompt)
+        x0_fn = self.get_x0_fn_from_batch(data_batch, guidance, is_negative_prompt=is_negative_prompt, use_cuda_graphs=use_cuda_graphs)
 
         if x_sigma_max is None:
             x_sigma_max = (

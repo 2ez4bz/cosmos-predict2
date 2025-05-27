@@ -298,6 +298,7 @@ class FinalLayer(nn.Module):
         x_B_T_H_W_D,
         emb_B_T_D,
         adaln_lora_B_T_3D: Optional[torch.Tensor] = None,
+        preserve_rng_state: bool = False,
     ):
         if self.use_adaln_lora:
             assert adaln_lora_B_T_3D is not None
@@ -315,7 +316,7 @@ class FinalLayer(nn.Module):
             return _norm_layer(_x_B_T_H_W_D) * (1 + _scale_B_T_1_1_D) + _shift_B_T_1_1_D
 
         x_B_T_H_W_D = checkpoint(
-            _fn, x_B_T_H_W_D, self.layer_norm, scale_B_T_1_1_D, shift_B_T_1_1_D, use_reentrant=False
+            _fn, x_B_T_H_W_D, self.layer_norm, scale_B_T_1_1_D, shift_B_T_1_1_D, use_reentrant=False, preserve_rng_state=preserve_rng_state
         )
         x_B_T_H_W_O = self.linear(
             x_B_T_H_W_D
@@ -418,6 +419,7 @@ class Block(nn.Module):
         rope_emb_L_1_1_D: Optional[torch.Tensor] = None,
         adaln_lora_B_T_3D: Optional[torch.Tensor] = None,
         extra_per_block_pos_emb: Optional[torch.Tensor] = None,
+        preserve_rng_state: bool = False,
     ) -> torch.Tensor:
         if extra_per_block_pos_emb is not None:
             x_B_T_H_W_D = x_B_T_H_W_D + extra_per_block_pos_emb
@@ -466,6 +468,7 @@ class Block(nn.Module):
             scale_self_attn_B_T_1_1_D,
             shift_self_attn_B_T_1_1_D,
             use_reentrant=False,
+            preserve_rng_state=preserve_rng_state,
         )
         result_B_T_H_W_D = rearrange(
             self.self_attn(
@@ -473,6 +476,7 @@ class Block(nn.Module):
                 rearrange(normalized_x_B_T_H_W_D, "b t h w d -> b (t h w) d"),
                 None,
                 rope_emb=rope_emb_L_1_1_D,
+                preserve_rng_state=preserve_rng_state,
             ),
             "b (t h w) d -> b t h w d",
             t=T,
@@ -496,6 +500,7 @@ class Block(nn.Module):
                     rearrange(_normalized_x_B_T_H_W_D, "b t h w d -> b (t h w) d"),
                     crossattn_emb,
                     rope_emb=rope_emb_L_1_1_D,
+                    preserve_rng_state=preserve_rng_state,
                 ),
                 "b (t h w) d -> b t h w d",
                 t=T,
@@ -514,15 +519,16 @@ class Block(nn.Module):
                 shift_cross_attn_B_T_1_1_D,
                 gate_cross_attn_B_T_1_1_D,
                 use_reentrant=False,
+                preserve_rng_state=preserve_rng_state,
             )
             * gate_cross_attn_B_T_1_1_D
             + x_B_T_H_W_D
         )
 
         normalized_x_B_T_H_W_D = checkpoint(
-            _fn, x_B_T_H_W_D, self.layer_norm_mlp, scale_mlp_B_T_1_1_D, shift_mlp_B_T_1_1_D, use_reentrant=False
+            _fn, x_B_T_H_W_D, self.layer_norm_mlp, scale_mlp_B_T_1_1_D, shift_mlp_B_T_1_1_D, use_reentrant=False, preserve_rng_state=preserve_rng_state,
         )
-        result_B_T_H_W_D = self.mlp(normalized_x_B_T_H_W_D)
+        result_B_T_H_W_D = self.mlp(normalized_x_B_T_H_W_D, preserve_rng_state=preserve_rng_state)
         x_B_T_H_W_D = x_B_T_H_W_D + gate_mlp_B_T_1_1_D * result_B_T_H_W_D
         return x_B_T_H_W_D
 

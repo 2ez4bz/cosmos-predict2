@@ -145,6 +145,7 @@ class DiffusionT2WModel(torch.nn.Module):
         n_sample: int | None = 1,
         is_negative_prompt: bool = False,
         num_steps: int = 35,
+        use_cuda_graphs: bool = False,
     ) -> Tensor:
         """Generate samples from a data batch using diffusion sampling.
 
@@ -159,6 +160,7 @@ class DiffusionT2WModel(torch.nn.Module):
             n_sample (int | None, optional): Number of samples to generate. Defaults to 1.
             is_negative_prompt (bool, optional): Whether to use negative prompt for unconditional generation. Defaults to False.
             num_steps (int, optional): Number of diffusion sampling steps. Defaults to 35.
+            use_cuda_graphs (bool, optional): Whether to use CUDA Graphs for inference. Defaults to False.
 
         Returns:
             Tensor: Generated samples after diffusion sampling
@@ -180,8 +182,8 @@ class DiffusionT2WModel(torch.nn.Module):
             t = t.to(**self.tensor_kwargs)
             ones_B = torch.ones(xt_scaled.size(0), device=xt_scaled.device, dtype=t.dtype)
             t = t * ones_B
-            net_output_cond = self.net(x_B_C_T_H_W=xt_scaled, timesteps_B_T=t, **condition.to_dict())
-            net_output_uncond = self.net(x_B_C_T_H_W=xt_scaled, timesteps_B_T=t, **uncondition.to_dict())
+            net_output_cond = self.net(x_B_C_T_H_W=xt_scaled, timesteps_B_T=t, use_cuda_graphs=use_cuda_graphs, **condition.to_dict())
+            net_output_uncond = self.net(x_B_C_T_H_W=xt_scaled, timesteps_B_T=t, use_cuda_graphs=use_cuda_graphs, **uncondition.to_dict())
             net_output = net_output_cond + guidance * (net_output_cond - net_output_uncond)
             # Compute the previous noisy sample x_t -> x_t-1
             xt = self.scheduler.step(net_output, t, xt).prev_sample

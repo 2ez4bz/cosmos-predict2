@@ -473,6 +473,7 @@ class Block(nn.Module):
                 rearrange(normalized_x_B_T_H_W_D, "b t h w d -> b (t h w) d"),
                 None,
                 rope_emb=rope_emb_L_1_1_D,
+                preserve_rng_state=True,
             ),
             "b (t h w) d -> b t h w d",
             t=T,
@@ -496,6 +497,7 @@ class Block(nn.Module):
                     rearrange(_normalized_x_B_T_H_W_D, "b t h w d -> b (t h w) d"),
                     crossattn_emb,
                     rope_emb=rope_emb_L_1_1_D,
+                    preserve_rng_state=True,
                 ),
                 "b (t h w) d -> b t h w d",
                 t=T,
@@ -522,7 +524,7 @@ class Block(nn.Module):
         normalized_x_B_T_H_W_D = checkpoint(
             _fn, x_B_T_H_W_D, self.layer_norm_mlp, scale_mlp_B_T_1_1_D, shift_mlp_B_T_1_1_D, use_reentrant=False
         )
-        result_B_T_H_W_D = self.mlp(normalized_x_B_T_H_W_D)
+        result_B_T_H_W_D = self.mlp(normalized_x_B_T_H_W_D, preserve_rng_state=True)
         x_B_T_H_W_D = x_B_T_H_W_D + gate_mlp_B_T_1_1_D * result_B_T_H_W_D
         return x_B_T_H_W_D
 

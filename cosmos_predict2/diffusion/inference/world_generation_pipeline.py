@@ -79,6 +79,7 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
         num_video_frames: int = 121,
         seed: int = 0,
         load_mean_std: bool = False,
+        use_cuda_graphs: bool = False,
     ):
         """Initialize the diffusion world generation pipeline.
 
@@ -103,6 +104,8 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
             num_video_frames: Number of frames to generate
             seed: Random seed for sampling
             load_mean_std: Whether to load mean_std for the Tokenizer (only for 81 frames).
+            use_cuda_graphs: Whether to use CUDA Graphs for inference.
+
         """
         assert inference_type in [
             "text2world",
@@ -118,6 +121,7 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
         self.num_video_frames = num_video_frames
         self.seed = seed
         self.load_mean_std = load_mean_std
+        self.use_cuda_graphs = use_cuda_graphs
         if self.load_mean_std:
             assert num_video_frames == 81, "'load_mean_std' can only be used when generating 81 frames."
 
@@ -255,6 +259,7 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
             num_video_frames=self.num_video_frames,
         )
 
+        self.model.eval()
         # Generate video frames
         sample = generate_world_from_text(
             model=self.model,
@@ -264,6 +269,7 @@ class DiffusionText2WorldGenerationPipeline(BaseWorldGenerationPipeline):
             guidance=self.guidance,
             num_steps=self.num_steps,
             seed=self.seed,
+            use_cuda_graphs=self.use_cuda_graphs,
         )
 
         return sample
@@ -412,6 +418,7 @@ class DiffusionText2ImageGenerationPipeline(BaseWorldGenerationPipeline):
         num_video_frames: int = 1,
         seed: int = 0,
         load_mean_std: bool = False,
+        use_cuda_graphs: bool = False,
     ):
         """Initialize the diffusion world generation pipeline.
 
@@ -434,6 +441,7 @@ class DiffusionText2ImageGenerationPipeline(BaseWorldGenerationPipeline):
             width: Width of output image
             seed: Random seed for sampling
             load_mean_std: Whether to load mean_std for the Tokenizer (only for 81 frames).
+            use_cuda_graphs: Whether to use CUDA Graphs for inference.
         """
         assert inference_type in [
             "text2image",
@@ -449,6 +457,7 @@ class DiffusionText2ImageGenerationPipeline(BaseWorldGenerationPipeline):
         self.num_video_frames = 1
         self.seed = seed
         self.load_mean_std = False
+        self.use_cuda_graphs = use_cuda_graphs
         # if self.load_mean_std:
         #     assert num_video_frames == 81, "'load_mean_std' can only be used when generating 81 frames."
 
@@ -611,6 +620,7 @@ class DiffusionText2ImageGenerationPipeline(BaseWorldGenerationPipeline):
             num_video_frames=self.num_video_frames,  # assert num_video_frames == 1
         )
 
+        self.model.eval()
         # Generate video frames
         sample = generate_world_from_text(
             model=self.model,
@@ -620,6 +630,7 @@ class DiffusionText2ImageGenerationPipeline(BaseWorldGenerationPipeline):
             guidance=self.guidance,
             num_steps=self.num_steps,
             seed=self.seed,
+            use_cuda_graphs=self.use_cuda_graphs,
         )
 
         return sample
@@ -771,6 +782,7 @@ class DiffusionVideo2WorldGenerationPipeline(DiffusionText2WorldGenerationPipeli
         num_video_frames: int = 121,
         seed: int = 0,
         num_input_frames: int = 1,
+        use_cuda_graphs: bool = False,
     ):
         """Initialize diffusion world generation pipeline.
 
@@ -795,6 +807,7 @@ class DiffusionVideo2WorldGenerationPipeline(DiffusionText2WorldGenerationPipeli
             num_video_frames: Number of frames to generate
             seed: Random seed for sampling
             num_input_frames: Number of latent conditions
+            use_cuda_graphs: Whether to use CUDA Graphs for inference.
         """
         self.num_input_frames = num_input_frames
         super().__init__(
@@ -817,6 +830,7 @@ class DiffusionVideo2WorldGenerationPipeline(DiffusionText2WorldGenerationPipeli
             fps=fps,
             num_video_frames=num_video_frames,
             seed=seed,
+            use_cuda_graphs=use_cuda_graphs,
         )
 
     def _run_prompt_upsampler_on_prompt(self, image_or_video_path: str, prompt: str) -> str:
@@ -892,6 +906,7 @@ class DiffusionVideo2WorldGenerationPipeline(DiffusionText2WorldGenerationPipeli
         #     num_input_frames=self.num_input_frames,
         # )
 
+        self.model.eval()
         video = generate_world_from_video_i4(
             model=self.model,
             is_negative_prompt=True,
@@ -900,6 +915,7 @@ class DiffusionVideo2WorldGenerationPipeline(DiffusionText2WorldGenerationPipeli
             num_steps=self.num_steps,
             seed=self.seed,
             num_input_frames=self.num_input_frames,
+            use_cuda_graphs=self.use_cuda_graphs,
         )
 
         return video

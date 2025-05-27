@@ -29,6 +29,7 @@ from torch.utils.checkpoint import checkpoint
 from torchvision import transforms
 from transformer_engine.pytorch.attention import DotProductAttention, apply_rotary_pos_emb
 
+from cosmos_predict2.diffusion.inference.graph import create_cuda_graph
 from cosmos_predict2.utils import log
 from cosmos_predict2.diffusion.conditioner import DataType
 from cosmos_predict2.diffusion.networks.model_weights_stats import WeightTrainingStat
@@ -96,7 +97,7 @@ class GPT2FeedForward(nn.Module):
             std = std / math.sqrt(2 * (self._layer_id + 1))
         torch.nn.init.trunc_normal_(self.layer2.weight, std=std, a=-3 * std, b=3 * std)
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, preserve_rng_state: bool = False):
         x = self.layer1(x)
 
         def activation_layer2_forward(x):
@@ -104,7 +105,7 @@ class GPT2FeedForward(nn.Module):
             x = self.layer2(x)
             return x
 
-        x = checkpoint(activation_layer2_forward, x, use_reentrant=False)
+        x = checkpoint(activation_layer2_forward, x, use_reentrant=False, preserve_rng_state=preserve_rng_state)
         return x
 
 
@@ -246,7 +247,7 @@ class Attention(nn.Module):
             if hasattr(layer, "reset_parameters"):
                 layer.reset_parameters()
 
-    def compute_qkv(self, x, context=None, rope_emb=None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def compute_qkv(self, x, context=None, rope_emb=None, preserve_rng_state=False) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         q = self.q_proj(x)
         context = x if context is None else context
         k = self.k_proj(context)
@@ -265,7 +266,7 @@ class Attention(nn.Module):
                 k = apply_rotary_pos_emb(k, rope_emb, tensor_format=self.qkv_format, fused=True)
             return q, k, v
 
-        q, k, v = checkpoint(apply_norm_and_rotary_pos_emb, q, k, v, rope_emb, use_reentrant=False)
+        q, k, v = checkpoint(apply_norm_and_rotary_pos_emb, q, k, v, rope_emb, use_reentrant=False, preserve_rng_state=preserve_rng_state)
 
         return q, k, v
 
@@ -278,13 +279,14 @@ class Attention(nn.Module):
         x,
         context=None,
         rope_emb=None,
+        preserve_rng_state=False,
     ):
         """
         Args:
             x (Tensor): The query tensor of shape [B, Mq, K]
             context (Optional[Tensor]): The key tensor of shape [B, Mk, K] or use x as context [self attention] if None
         """
-        q, k, v = self.compute_qkv(x, context, rope_emb=rope_emb)
+        q, k, v = self.compute_qkv(x, context, rope_emb=rope_emb, preserve_rng_state=preserve_rng_state)
         return self.compute_attention(q, k, v)
 
     def set_context_parallel_group(self, process_group, ranks, stream):
@@ -759,6 +761,7 @@ class FinalLayer(nn.Module):
         x_B_T_H_W_D,
         emb_B_T_D,
         adaln_lora_B_T_3D: Optional[torch.Tensor] = None,
+        preserve_rng_state: bool = False,
     ):
         if self.use_adaln_lora:
             assert adaln_lora_B_T_3D is not None
@@ -776,7 +779,7 @@ class FinalLayer(nn.Module):
             return _norm_layer(_x_B_T_H_W_D) * (1 + _scale_B_T_1_1_D) + _shift_B_T_1_1_D
 
         x_B_T_H_W_D = checkpoint(
-            _fn, x_B_T_H_W_D, self.layer_norm, scale_B_T_1_1_D, shift_B_T_1_1_D, use_reentrant=False
+            _fn, x_B_T_H_W_D, self.layer_norm, scale_B_T_1_1_D, shift_B_T_1_1_D, use_reentrant=False, preserve_rng_state=preserve_rng_state,
         )
         x_B_T_H_W_O = self.linear(
             x_B_T_H_W_D
@@ -879,6 +882,7 @@ class Block(nn.Module):
         rope_emb_L_1_1_D: Optional[torch.Tensor] = None,
         adaln_lora_B_T_3D: Optional[torch.Tensor] = None,
         extra_per_block_pos_emb: Optional[torch.Tensor] = None,
+        preserve_rng_state: bool = False,
     ) -> torch.Tensor:
         if extra_per_block_pos_emb is not None:
             x_B_T_H_W_D = x_B_T_H_W_D + extra_per_block_pos_emb
@@ -927,6 +931,7 @@ class Block(nn.Module):
             scale_self_attn_B_T_1_1_D,
             shift_self_attn_B_T_1_1_D,
             use_reentrant=False,
+            preserve_rng_state=preserve_rng_state,
         )
         result_B_T_H_W_D = rearrange(
             self.self_attn(
@@ -934,6 +939,7 @@ class Block(nn.Module):
                 rearrange(normalized_x_B_T_H_W_D, "b t h w d -> b (t h w) d"),
                 None,
                 rope_emb=rope_emb_L_1_1_D,
+                preserve_rng_state=preserve_rng_state,
             ),
             "b (t h w) d -> b t h w d",
             t=T,
@@ -957,6 +963,7 @@ class Block(nn.Module):
                     rearrange(_normalized_x_B_T_H_W_D, "b t h w d -> b (t h w) d"),
                     crossattn_emb,
                     rope_emb=rope_emb_L_1_1_D,
+                    preserve_rng_state=preserve_rng_state,
                 ),
                 "b (t h w) d -> b t h w d",
                 t=T,
@@ -975,15 +982,16 @@ class Block(nn.Module):
                 shift_cross_attn_B_T_1_1_D,
                 gate_cross_attn_B_T_1_1_D,
                 use_reentrant=False,
+                preserve_rng_state=preserve_rng_state
             )
             * gate_cross_attn_B_T_1_1_D
             + x_B_T_H_W_D
         )
 
         normalized_x_B_T_H_W_D = checkpoint(
-            _fn, x_B_T_H_W_D, self.layer_norm_mlp, scale_mlp_B_T_1_1_D, shift_mlp_B_T_1_1_D, use_reentrant=False
+            _fn, x_B_T_H_W_D, self.layer_norm_mlp, scale_mlp_B_T_1_1_D, shift_mlp_B_T_1_1_D, use_reentrant=False, preserve_rng_state=preserve_rng_state,
         )
-        result_B_T_H_W_D = self.mlp(normalized_x_B_T_H_W_D)
+        result_B_T_H_W_D = self.mlp(normalized_x_B_T_H_W_D, preserve_rng_state=preserve_rng_state)
         x_B_T_H_W_D = x_B_T_H_W_D + gate_mlp_B_T_1_1_D * result_B_T_H_W_D
         return x_B_T_H_W_D
 
@@ -1120,6 +1128,7 @@ class MiniTrainDIT(WeightTrainingStat):
         self.init_weights()
 
         self._is_context_parallel_enabled = False
+        self.cuda_graphs = {}
 
     def init_weights(self):
         self.x_embedder.init_weights()
@@ -1250,6 +1259,7 @@ class MiniTrainDIT(WeightTrainingStat):
         )
         return x_B_C_Tt_Hp_Wp
 
+
     def forward(
         self,
         x_B_C_T_H_W: torch.Tensor,
@@ -1258,6 +1268,7 @@ class MiniTrainDIT(WeightTrainingStat):
         fps: Optional[torch.Tensor] = None,
         padding_mask: Optional[torch.Tensor] = None,
         data_type: Optional[DataType] = DataType.VIDEO,
+        use_cuda_graphs: bool = False,
     ) -> torch.Tensor | List[torch.Tensor] | Tuple[torch.Tensor, List[torch.Tensor]]:
         """
         Args:
@@ -1291,22 +1302,37 @@ class MiniTrainDIT(WeightTrainingStat):
                 x_B_T_H_W_D.shape == extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D.shape
             ), f"{x_B_T_H_W_D.shape} != {extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D.shape}"
 
-        B, T, H, W, D = x_B_T_H_W_D.shape
-        # x_B_THW_D = rearrange(x_B_T_H_W_D, "b t h w d -> b (t h w) d")
 
-        for block in self.blocks:
+        if use_cuda_graphs:
+            shapes_key = create_cuda_graph(
+                self.cuda_graphs,
+                self.blocks,
+                x_B_T_H_W_D,
+                t_embedding_B_T_D,
+                crossattn_emb,
+                rope_emb_L_1_1_D,
+                adaln_lora_B_T_3D,
+                extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D,
+            )
+            blocks = self.cuda_graphs[shapes_key]
+        else:
+            blocks = self.blocks
+
+        block_kwargs = {
+            "rope_emb_L_1_1_D": rope_emb_L_1_1_D,
+            "adaln_lora_B_T_3D": adaln_lora_B_T_3D,
+            "extra_per_block_pos_emb": extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D
+        }
+        if not use_cuda_graphs:
+            block_kwargs["preserve_rng_state"] = True
+        for block in blocks:
             x_B_T_H_W_D = block(
                 x_B_T_H_W_D,
                 t_embedding_B_T_D,
                 crossattn_emb,
-                rope_emb_L_1_1_D=rope_emb_L_1_1_D,
-                adaln_lora_B_T_3D=adaln_lora_B_T_3D,
-                extra_per_block_pos_emb=extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D,
+                **block_kwargs,
             )
-
-        # x_B_T_H_W_D = rearrange(x_B_THW_D, "b (t h w) d -> b t h w d", t=T, h=H, w=W)
-        # O = out_channels * spatial_patch_size * spatial_patch_size * temporal_patch_size
-        x_B_T_H_W_O = self.final_layer(x_B_T_H_W_D, t_embedding_B_T_D, adaln_lora_B_T_3D=adaln_lora_B_T_3D)
+        x_B_T_H_W_O = self.final_layer(x_B_T_H_W_D, t_embedding_B_T_D, adaln_lora_B_T_3D=adaln_lora_B_T_3D, preserve_rng_state=not use_cuda_graphs)
         x_B_C_Tt_Hp_Wp = self.unpatchify(x_B_T_H_W_O)
         return x_B_C_Tt_Hp_Wp
 

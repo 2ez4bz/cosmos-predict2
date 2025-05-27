@@ -60,6 +60,11 @@ def parse_arguments() -> argparse.Namespace:
         help="Number of input frames for video2world prediction",
         choices=[1, 9],
     )
+    parser.add_argument(
+        "--use_cuda_graphs",
+        action="store_true",
+        help="Use CUDA Graphs for the inference.",
+    )
 
     return parser.parse_args()
 
@@ -122,6 +127,7 @@ def demo(args):
         num_video_frames=args.num_video_frames,
         seed=args.seed,
         num_input_frames=args.num_input_frames,
+        use_cuda_graphs=args.use_cuda_graphs,
     )
 
     if args.num_gpus > 1:

@@ -70,6 +70,7 @@ class VideoExtendGeneralDIT(GeneralDIT):
         condition_video_indicator: Optional[torch.Tensor] = None,
         condition_video_input_mask: Optional[torch.Tensor] = None,
         condition_video_augment_sigma: Optional[torch.Tensor] = None,
+        use_cuda_graphs: bool = False,
         **kwargs,
     ) -> torch.Tensor:
         """Forward pass of the video-conditioned DIT model.
@@ -88,6 +89,7 @@ class VideoExtendGeneralDIT(GeneralDIT):
             condition_video_indicator: Optional video condition indicator tensor
             condition_video_input_mask: Required mask tensor for video data type
             condition_video_augment_sigma: Optional sigma values for conditional input augmentation
+            use_cuda_graphs: Whether to use CUDA Graphs for inference. Defaults to False.
             **kwargs: Additional keyword arguments
 
         Returns:
@@ -123,6 +125,7 @@ class VideoExtendGeneralDIT(GeneralDIT):
             scalar_feature=scalar_feature,
             data_type=data_type,
             condition_video_augment_sigma=condition_video_augment_sigma,
+            use_cuda_graphs=use_cuda_graphs,
             **kwargs,
         )
 

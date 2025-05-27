@@ -47,7 +47,7 @@ class GPT2FeedForward(nn.Module):
             std = std / math.sqrt(2 * (self._layer_id + 1))
         torch.nn.init.trunc_normal_(self.layer2.weight, std=std, a=-3 * std, b=3 * std)
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: torch.Tensor, preserve_rng_state: bool = False):
         x = self.layer1(x)
 
         def activation_layer2_forward(x):
@@ -55,7 +55,7 @@ class GPT2FeedForward(nn.Module):
             x = self.layer2(x)
             return x
 
-        x = checkpoint(activation_layer2_forward, x, use_reentrant=False)
+        x = checkpoint(activation_layer2_forward, x, use_reentrant=False, preserve_rng_state=preserve_rng_state)
         return x
 
 
@@ -106,7 +106,6 @@ def torch_attention_op(q_B_S_H_D, k_B_S_H_D, v_B_S_H_D):
     )
 
     return result_B_S_HD
-
 
 
 class Attention(nn.Module):
@@ -209,7 +208,7 @@ class Attention(nn.Module):
             if hasattr(layer, "reset_parameters"):
                 layer.reset_parameters()
 
-    def compute_qkv(self, x, context=None, rope_emb=None) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    def compute_qkv(self, x, context=None, rope_emb=None, preserve_rng_state=False) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         q = self.q_proj(x)
         context = x if context is None else context
         k = self.k_proj(context)
@@ -228,7 +227,7 @@ class Attention(nn.Module):
                 k = apply_rotary_pos_emb(k, rope_emb, tensor_format=self.qkv_format, fused=True)
             return q, k, v
 
-        q, k, v = checkpoint(apply_norm_and_rotary_pos_emb, q, k, v, rope_emb, use_reentrant=False)
+        q, k, v = checkpoint(apply_norm_and_rotary_pos_emb, q, k, v, rope_emb, use_reentrant=False, preserve_rng_state=preserve_rng_state)
 
         return q, k, v
 
@@ -241,13 +240,14 @@ class Attention(nn.Module):
         x,
         context=None,
         rope_emb=None,
+        preserve_rng_state=False,
     ):
         """
         Args:
             x (Tensor): The query tensor of shape [B, Mq, K]
             context (Optional[Tensor]): The key tensor of shape [B, Mk, K] or use x as context [self attention] if None
         """
-        q, k, v = self.compute_qkv(x, context, rope_emb=rope_emb)
+        q, k, v = self.compute_qkv(x, context, rope_emb=rope_emb, preserve_rng_state=preserve_rng_state)
         return self.compute_attention(q, k, v)
 
     def set_context_parallel_group(self, process_group, ranks, stream):

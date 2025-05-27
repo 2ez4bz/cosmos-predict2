@@ -27,7 +27,8 @@ from torchvision import transforms
 import transformer_engine as te
 
 from cosmos_predict2.diffusion.conditioner import DataType
-from cosmos_predict2.diffusion.module.attention import get_normalization
+from torch.distributed._composable.fsdp import fully_shard
+from cosmos_predict2.diffusion.inference.graph import create_cuda_graph
 from cosmos_predict2.diffusion.module.blocks import (
     FinalLayer,
     Block,
@@ -173,6 +174,7 @@ class GeneralDIT(nn.Module):
 
         self._is_context_parallel_enabled = False
         self.cp_group = None
+        self.cuda_graphs = {}
 
     def init_weights(self):
         self.x_embedder.init_weights()
@@ -311,6 +313,7 @@ class GeneralDIT(nn.Module):
         fps: Optional[torch.Tensor] = None,
         padding_mask: Optional[torch.Tensor] = None,
         data_type: Optional[DataType] = DataType.VIDEO,
+        use_cuda_graphs: bool = False,
         **kwargs,
     ) -> torch.Tensor | List[torch.Tensor] | Tuple[torch.Tensor, List[torch.Tensor]]:
         """
@@ -322,7 +325,7 @@ class GeneralDIT(nn.Module):
         assert isinstance(
             data_type, DataType
         ), f"Expected DataType, got {type(data_type)}. We need discuss this flag later."
-
+        assert not (self.training and use_cuda_graphs), "CUDA Graphs are supported only for inference"
         x_B_T_H_W_D, rope_emb_L_1_1_D, extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D = self.prepare_embedded_sequence(
             x_B_C_T_H_W,
             fps=fps,
@@ -346,19 +349,36 @@ class GeneralDIT(nn.Module):
                 x_B_T_H_W_D.shape == extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D.shape
             ), f"{x_B_T_H_W_D.shape} != {extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D.shape}"
 
-        B, T, H, W, D = x_B_T_H_W_D.shape
-        # x_B_THW_D = rearrange(x_B_T_H_W_D, "b t h w d -> b (t h w) d")
+        if use_cuda_graphs:
+            shapes_key = create_cuda_graph(
+                self.cuda_graphs,
+                self.blocks,
+                x_B_T_H_W_D,
+                t_embedding_B_T_D,
+                crossattn_emb,
+                rope_emb_L_1_1_D,
+                adaln_lora_B_T_3D,
+                extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D,
+            )
+            blocks = self.cuda_graphs[shapes_key]
+        else:
+            blocks = self.blocks
 
-        for block in self.blocks:
+        block_kwargs = {
+            "rope_emb_L_1_1_D": rope_emb_L_1_1_D,
+            "adaln_lora_B_T_3D": adaln_lora_B_T_3D,
+            "extra_per_block_pos_emb": extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D
+        }
+        if not use_cuda_graphs:
+            block_kwargs["preserve_rng_state"] = True
+        for block in blocks:
             x_B_T_H_W_D = block(
                 x_B_T_H_W_D,
                 t_embedding_B_T_D,
                 crossattn_emb,
-                rope_emb_L_1_1_D=rope_emb_L_1_1_D,
-                adaln_lora_B_T_3D=adaln_lora_B_T_3D,
-                extra_per_block_pos_emb=extra_pos_emb_B_T_H_W_D_or_T_H_W_B_D,
+                **block_kwargs,
             )
-        x_B_T_H_W_O = self.final_layer(x_B_T_H_W_D, t_embedding_B_T_D, adaln_lora_B_T_3D=adaln_lora_B_T_3D)
+        x_B_T_H_W_O = self.final_layer(x_B_T_H_W_D, t_embedding_B_T_D, adaln_lora_B_T_3D=adaln_lora_B_T_3D, preserve_rng_state=not use_cuda_graphs)
         x_B_C_Tt_Hp_Wp = self.unpatchify(x_B_T_H_W_O)
         return x_B_C_Tt_Hp_Wp
 

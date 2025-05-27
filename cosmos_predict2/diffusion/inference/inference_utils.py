@@ -555,6 +555,7 @@ def generate_world_from_text(
     guidance: float,
     num_steps: int,
     seed: int,
+    use_cuda_graphs: bool = False,
 ):
     """Generate video from text prompt using diffusion model.
 
@@ -566,6 +567,7 @@ def generate_world_from_text(
         guidance (float): Classifier-free guidance scale
         num_steps (int): Number of diffusion sampling steps
         seed (int): Random seed for reproducibility
+        use_cuda_graphs (bool, optional): Whether to use CUDA Graphs for inference. Defaults to False.
 
     Returns:
         np.ndarray: Generated video frames [T,H,W,C], range [0,255]
@@ -584,6 +586,7 @@ def generate_world_from_text(
         num_steps=num_steps,
         is_negative_prompt=is_negative_prompt,
         seed=seed,
+        use_cuda_graphs=use_cuda_graphs,
     )
 
     return sample
@@ -652,6 +655,7 @@ def generate_world_from_video_i4(
     num_steps: int,
     seed: int,
     num_input_frames: int,
+    use_cuda_graphs: bool = False,
 ) -> Tuple[np.array, list, list]:
     """Generate video using a conditioning video/image input.
 
@@ -664,6 +668,7 @@ def generate_world_from_video_i4(
         seed (int): Random seed for generation
         condition_latent (torch.Tensor): Latent tensor from conditioning video/image file
         num_input_frames (int): Number of input frames
+        use_cuda_graphs (bool, optional): Whether to use CUDA Graphs for inference. Defaults to False.
 
     Returns:
         np.array: Generated video frames in shape [T,H,W,C], range [0,255]
@@ -678,6 +683,7 @@ def generate_world_from_video_i4(
         seed=seed,
         is_negative_prompt=is_negative_prompt,  # Use classifier-free guidance
         num_steps=num_steps,
+        use_cuda_graphs=use_cuda_graphs,
     )
 
     return sample

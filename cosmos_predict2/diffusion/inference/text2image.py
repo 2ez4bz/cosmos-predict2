@@ -60,6 +60,11 @@ def parse_arguments() -> argparse.Namespace:
         action="store_true",
         help="Load mean_std from a checkpoint for the Tokenizer.",
     )
+    parser.add_argument(
+        "--use_cuda_graphs",
+        action="store_true",
+        help="Use CUDA Graphs for the inference.",
+    )
 
     return parser.parse_args()
 
@@ -122,6 +127,7 @@ def demo(args):
         seed=args.seed,
         # load_mean_std=args.load_mean_std,
         load_mean_std=False,
+        use_cuda_graphs=args.use_cuda_graphs,
     )
 
     if args.num_gpus > 1:
