@@ -23,15 +23,24 @@ Command:
 import argparse
 import os
 
-from cosmos_predict2.auxiliary.guardrail.common import presets as guardrail_presets
+import torch
+from qwen_vl_utils import process_vision_info
+from transformers import AutoProcessor, LogitsProcessor, LogitsProcessorList, Qwen2_5_VLForConditionalGeneration
 
+from cosmos_predict2.auxiliary.guardrail.common import presets as guardrail_presets
 from cosmos_predict2.utils import log
 
-from qwen_vl_utils import process_vision_info
-from transformers import AutoProcessor, Qwen2_5_VLForConditionalGeneration
-import torch
 
+class AllowedTokensLogitsProcessor(LogitsProcessor):
+    def __init__(self, allowed_token_ids: list[int]):
+        self.allowed_token_ids = set(allowed_token_ids)
 
+    def __call__(self, input_ids: torch.LongTensor, scores: torch.FloatTensor) -> torch.FloatTensor:
+        mask = torch.full_like(scores, float("-inf"))
+        for idx in self.allowed_token_ids:
+            mask[:, idx] = scores[:, idx]
+        return mask
+    
 VL_EN_SYS_PROMPT = (
     """You are a prompt optimization specialist whose goal is to rewrite the user's input prompts into high-quality English prompts by referring to the details of the user's input images, making them more complete and expressive while maintaining the original meaning. You need to integrate the content of the user's photo with the input prompt for the rewrite, strictly adhering to the formatting of the examples provided.\n"""
     """Task Requirements:\n"""
@@ -104,7 +113,13 @@ def run_chat_completion(processor: AutoProcessor, model: Qwen2_5_VLForConditiona
     )
     # Inference: Generation of the output
     inputs = inputs.to("cuda")
-    generated_ids = model.generate(**inputs, max_new_tokens=512)
+    # mask out non-English characters
+    allowed_token_ids = [
+        i for i in range(processor.tokenizer.vocab_size) if all(ord(c) < 128 for c in processor.tokenizer.decode([i]))
+    ]
+    allowed_token_ids.extend(processor.tokenizer.all_special_ids)
+    logits_processor = LogitsProcessorList([AllowedTokensLogitsProcessor(allowed_token_ids)])
+    generated_ids = model.generate(**inputs, max_new_tokens=512, logits_processor=logits_processor)
     generated_ids_trimmed = [out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)]
     output_text = processor.batch_decode(
         generated_ids_trimmed, skip_special_tokens=True, clean_up_tokenization_spaces=False
@@ -115,7 +130,7 @@ def run_chat_completion(processor: AutoProcessor, model: Qwen2_5_VLForConditiona
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Run prompt upsampler inference")
-    parser.add_argument("--image_or_video_path", type=str, default="assets/diffusion/video2world_input0.jpg")
+    parser.add_argument("--image_or_video_path", type=str, default="assets/video2world/input0.jpg")
     parser.add_argument("--prompt", type=str, default=None)
     parser.add_argument(
         "--checkpoint_dir", type=str, default="checkpoints", help="Base directory containing model checkpoints"
@@ -123,7 +138,7 @@ def parse_args():
     parser.add_argument(
         "--prompt_upsampler_dir",
         type=str,
-        default="Pixtral-12B",
+        default="nvidia/Cosmos-Reason1-7B",
         help="Prompt upsampler weights directory relative to checkpoint_dir",
     )
     return parser.parse_args()
