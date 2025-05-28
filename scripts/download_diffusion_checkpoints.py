@@ -19,7 +19,7 @@ from pathlib import Path
 
 from huggingface_hub import snapshot_download
 
-# from scripts.download_guardrail_checkpoints import download_guardrail_checkpoints
+from scripts.download_guardrail_checkpoints import download_guardrail_checkpoints
 
 
 def parse_args():
@@ -155,7 +155,7 @@ def main(args):
                 **download_kwargs,
             )
 
-    # download_guardrail_checkpoints(args.checkpoint_dir)
+    download_guardrail_checkpoints(args.checkpoint_dir)
 
 
 if __name__ == "__main__":

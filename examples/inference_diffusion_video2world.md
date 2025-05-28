@@ -12,7 +12,7 @@ Please refer to the Inference section of [INSTALL.md](/INSTALL.md#inference) for
    ```bash
    huggingface-cli login
    ```
-3. Accept the [LlamaGuard-7b terms](https://huggingface.co/meta-llama/LlamaGuard-7b)
+3. Accept the [Llama-Guard-3-8B terms](https://huggingface.co/meta-llama/Llama-Guard-3-8B)
 
 4. Download the Cosmos model weights from [Hugging Face](https://huggingface.co/collections/nvidia/cosmos-predict2-68028efc052239369a0f2959):
    ```bash

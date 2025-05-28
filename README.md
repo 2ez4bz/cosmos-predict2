@@ -61,7 +61,7 @@ Upcoming: we are working on easier installations options including a packaged Do
    ```bash
    huggingface-cli login
    ```
-3. Accept the [LlamaGuard-7b terms](https://huggingface.co/meta-llama/LlamaGuard-7b)
+3. Accept the [Llama-Guard-3-8B terms](https://huggingface.co/meta-llama/Llama-Guard-3-8B)
 
 4. Download the Cosmos model weights from [Hugging Face](https://huggingface.co/collections/nvidia/cosmos-predict2-68028efc052239369a0f2959):
    ```bash
@@ -92,6 +92,8 @@ Big thanks 🙏 to everyone helping us push the boundaries of open-source physic
 
 This project will download and install additional third-party open source software projects. Review the license terms of these open source projects before use.
 
+This model includes safety and content moderation features powered by Llama Guard 3. Llama Guard 3 is used solely as a content input filter and is subject to its own license.
+
 NVIDIA Cosmos source code is released under the [Apache 2 License](https://www.apache.org/licenses/LICENSE-2.0).
 
-NVIDIA Cosmos models are released under the [NVIDIA Open Model License](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license). For a custom license (such as exemption of guardrail), please contact [cosmos-license@nvidia.com](mailto:cosmos-license@nvidia.com).
+NVIDIA Cosmos models are released under the [NVIDIA Open Model License](https://www.nvidia.com/en-us/agreements/enterprise-software/nvidia-open-model-license). For a custom license, please contact [cosmos-license@nvidia.com](mailto:cosmos-license@nvidia.com).
