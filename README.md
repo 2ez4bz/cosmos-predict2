@@ -7,7 +7,7 @@
 Cosmos-Predict2 is a key branch of Cosmos World Foundation Models (WFMs) specialized for future state prediction, often referred to as world models. The three main branches of Cosmos WFMs are [cosmos-predict](https://github.com/nvidia-cosmos/cosmos-predict2), [cosmos-transfer](https://github.com/nvidia-cosmos/cosmos-transfer1), and [cosmos-reason](https://github.com/nvidia-cosmos/cosmos-reason1). We visualize the architecture of Cosmos-Predict2 in the following figure.
 
 <p align="center">
-    <img src="assets/cosmos_predict_diagram.png" alt="Cosmos-Predict Architecture Diagram">
+    <img src="assets/cosmos-predict-diagram.png" alt="Cosmos-Predict Architecture Diagram">
 </p>
 
 ## Key Features
