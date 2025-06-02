@@ -18,6 +18,12 @@ Cosmos-Predict2 includes the following:
 ## News
 - [2025/05] Initial release of Predict2! This is a major upgrade from Predict1. Please try it out and give us feedback. 
 
+## System Requirements
+
+Cosmos-Predict2 requires:
+* Linux operating system (tested with Ubuntu 20.04, 22.04, and 24.04)
+* NVIDIA GPUs with Ampere architecture (RTX 30 Series, A100) or newer. See our [Performance Benchmarks](#performance-benchmarks) for detailed hardware requirements and recommendations.
+
 ## Documentation
 See below for quickstart installation and usage examples. 
 
@@ -80,6 +86,31 @@ Cosmos-Predict2 include the following models
 * [Cosmos-Predict2-14B-Text2Image](https://huggingface.co/nvidia/Cosmos-Predict2-14B-Text2Image): Text to image generation
 * [Cosmos-Predict2-2B-Video2World](https://huggingface.co/nvidia/Cosmos-Predict2-2B-Video2World): Video + Text based future visual world generation
 * [Cosmos-Predict2-14B-Video2World](https://huggingface.co/nvidia/Cosmos-Predict2-14B-Video2World): Video + Text based future visual world generation
+
+## Performance Benchmarks
+
+Here are the GPU memory requirements for each model in our suite:
+
+|                      | Cosmos-Predict2-2B-Text2Image | Cosmos-Predict2-14B-Text2Image | Cosmos-Predict2-2B-Video2World | Cosmos-Predict2-14B-Video2World |
+|---------------------------------|-----------------------------------|-----------------------------------|-----------------------------------|-----------------------------------|
+| Required GPU VRAM | 26.02 GB | 48.93 GB | 32.54 GB | 56.38 GB |
+
+The following benchmarks provide detailed performance metrics across different GPU hardware (for a single generation):
+
+| GPU Hardware                     | Cosmos-Predict2-2B-Text2Image | Cosmos-Predict2-14B-Text2Image | Cosmos-Predict2-2B-Video2World | Cosmos-Predict2-14B-Video2World |
+|---------------------------------|-----------------------------------|-----------------------------------|-----------------------------------|-----------------------------------|
+| NVIDIA GB200 | 3.39 sec | 8.5 sec | 25.61 sec | 85.26 sec |
+| NVIDIA B200 | 3.24 sec | 8.68 sec | 30.7 sec | 92.59 sec |
+| NVIDIA RTX PRO 6000 Workstation Edition | 5.59 sec | 24.16 sec | 82.43 sec | 321.9 sec |
+| NVIDIA GeForce RTX 5090 | 26.8 sec | 435.02 sec | 209.88 sec | (OOM) |
+| NVIDIA DGX Spark | 24.87 sec | 138.94 sec | 344.64 sec | 1902.26 sec |
+| NVIDIA H200 SXM | 9.02 sec | 15.96 sec | 50.2 sec | 176.19 sec |
+| NVIDIA H200 NVL | 6.34 sec | 16.95 sec | 54.01 sec | 203.56 sec |
+| NVIDIA H100 PCIe | 11.12 sec | 23.83 sec | 79.87 sec | 286.46 sec |
+| NVIDIA H100 NVL | 5.05 sec | 23.97 sec | 87.32 sec | 377.67 sec |
+| NVIDIA H20 | 11.47 sec | 59.59 sec | 179.69 sec | 852.64 sec |
+| NVIDIA L40S | 8.9 sec | (OOM) | 127.49 sec | 1036.24 sec |
+| NVIDIA RTX 6000 Ada Generation | 11.94 sec | 167.86 sec | 180.99 sec | 876.68 sec |
 
 ## Contribute
 
