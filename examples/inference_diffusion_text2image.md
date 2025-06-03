@@ -130,3 +130,9 @@ CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/infer
     --offload_prompt_upsampler \
     --video_save_folder diffusion-text2world-2b-batch
 ``` -->
+
+### Prompt engineering tips
+
+To generate physically plausible images with our text2image models, focus on realistic detail, accurate proportions, and logically consistent environments. Be specific about the subject, action, and context. Describe materials, lighting, and object sizes relative to one another. For example, use "a two-story brick house with a tiled roof on a concrete foundation in a suburban neighborhood under natural daylight" instead of vague or surreal descriptions.
+
+Incorporate references to real-world materials or photography terms like "depth of field", "natural lighting", or "wide-angle lens" to guide the model toward physically grounded results. Avoid abstract or artistic modifiers unless you're intentionally going for surrealism. Review your prompt to ensure each element could exist and behave naturally, and refine as needed for coherence and believability.

@@ -184,3 +184,10 @@ CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/infer
     --disable_prompt_upsampler \
     --video_save_folder diffusion-video2world-2b-batch-wo-ps
 ``` -->
+
+
+### Prompt engineering tips
+
+To generate physically plausible videos with our video2world models, focus on realistic motion, consistent physics, and coherent environments. Start with a grounded scene. Describe the setting, characters, and actions clearly, such as "a person jogging on a sidewalk while cars pass by on the road." Ensure the initial frame is physically reasonable and sets up logical progression.
+
+Avoid vague or surreal descriptions unless intentional. Instead, use real-world references and focus on how objects and characters interact naturally. Refine prompts based on output to correct issues like jerky motion or lighting inconsistencies. The more your prompt reflects real-world behavior and timing, the more believable the resulting video will be.
