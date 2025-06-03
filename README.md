@@ -182,6 +182,28 @@ The following benchmarks provide detailed performance metrics across different G
 | NVIDIA L40S | 8.9 sec | (OOM) | 127.49 sec | 1036.24 sec |
 | NVIDIA RTX 6000 Ada Generation | 11.94 sec | 167.86 sec | 180.99 sec | 876.68 sec |
 
+### Which models should I use?
+
+The choice between 2B and 14B models depends on your specific needs, hardware constraints, and performance requirements:
+
+#### Use 2B models When:
+- You need faster inference times and lower latency
+- You have limited GPU memory (requires ~26-33GB VRAM)
+- Your use case involves simpler scenes and compositions
+- You're doing rapid prototyping or testing
+- You need to process a large batch of images/videos efficiently
+
+#### Use 14B models When:
+- You need higher quality and more detailed outputs
+- You have sufficient GPU resources (requires ~49-57GB VRAM)
+- Your use case involves complex scenes with intricate details
+- Output quality is prioritized over generation speed
+- You're working on final production assets
+
+The 14B models generally produce higher fidelity results with better coherence and detail, but come with increased computational costs. The 2B models offer a good balance of quality and performance for many practical applications while being more resource-efficient.
+
+For most development and testing scenarios, starting with the 2B models is recommended. You can then scale up to 14B models when higher quality is needed and hardware resources permit.
+
 ## Contribute
 
 We thrive on community collaboration! [NVIDIA-Cosmos](https://github.com/nvidia-cosmos/) wouldn’t be where it is without contributions from developers like you. Check out our [Contributing Guide](CONTRIBUTING.md) to get started, and share your feedback through issues.
