@@ -223,7 +223,6 @@ The `video2world.py` script supports the following command-line arguments:
 - `--seed`: Random seed for reproducible results (default: 42)
 
 #### Model Size and Configuration
-- `--num_gpus`: Number of GPUs to use for distributed inference
 - `--num_input_frames`: Number of input frames for video2world prediction (choices: 1, 9, default: 1)
 
 #### Generation Parameters
@@ -251,5 +250,3 @@ The `video2world.py` script supports the following command-line arguments:
 
 #### Safety Features
 - `--disable_guardrail`: Disable safety guardrails
-
-

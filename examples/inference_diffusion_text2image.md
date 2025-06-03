@@ -166,9 +166,6 @@ The `text2image.py` script supports the following command-line arguments:
 - `--image_save_folder`: Directory to save output images (default: "outputs")
 - `--seed`: Random seed for reproducible results (default: 42)
 
-#### Model Size and Configuration
-- `--num_gpus`: Number of GPUs to use for distributed inference
-
 #### Generation Parameters
 - `--guidance`: Classifier-free guidance scale (default: 7.5)
 - `--num_steps`: Number of diffusion steps (default: 50)
@@ -193,5 +190,3 @@ The `text2image.py` script supports the following command-line arguments:
 
 #### Safety Features
 - `--disable_guardrail`: Disable safety guardrails
-
-
