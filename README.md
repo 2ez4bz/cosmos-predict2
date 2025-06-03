@@ -15,28 +15,78 @@ Cosmos-Predict2 includes the following:
 
 - **Diffusion-based world foundation models** for Text2Image and Video2World generation, where a user can generate visual simulation based on text prompts or video prompts.
 
-<table width="100%" style="table-layout:fixed; border-collapse: collapse;">
+## News
+- [2025/05] Initial release of Predict2! This is a major upgrade from Predict1. Please try it out and give us feedback. 
+
+## Examples
+
+### Text2Image
+
+<table>
   <tr>
-    <th colspan="2" align="center" style="padding:8px; border:1px solid #444;">
-      Image → Video
-    </th>
-  </tr>
-  <tr>
-    <td width="50%" valign="top" style="padding:8px; border:1px solid #444;">
-      <!-- Replace the src value with your image path -->
-      <img src="" alt="Add Image Here" width="100%" />
+    <td width="50%">
+      <div align="center"><b>Input Prompt</b></div>
+      <sub>Two cyclists ride along a smooth, open road lined with tall pine trees under soft natural light. The rider in the foreground, wearing a blue helmet, red-accented black jacket, and cycling gloves, maintains a focused expression as he leans forward, gripping the handlebars. Behind him, another cyclist dressed in all black follows closely, his posture slightly hunched and his expression engaged. The motion blur on the road surface and trees enhances the sense of speed and fluidity. The camera captures the scene from a low, side angle, emphasizing the dynamic forward movement through the serene forested environment.</sub>
     </td>
-    <td width="50%" valign="top" style="padding:8px; border:1px solid #444;">
-      <!-- Replace the src value with your video path -->
-      <video src="" width="100%" controls>
-        Your browser does not support the video tag.
-      </video>
+    <td width="50%">
+      <div align="center"><b>Output Image</b></div>
+      <img src="assets/text2image/0.jpg">
     </td>
   </tr>
 </table>
 
-## News
-- [2025/05] Initial release of Predict2! This is a major upgrade from Predict1. Please try it out and give us feedback. 
+<table>
+  <tr>
+    <td width="50%">
+      <div align="center"><b>Input Prompt</b></div>
+      <sub>A person is mixing guacamole in a glass bowl with a wooden spoon. Their hands are actively stirring the mixture, which includes chunks of avocado, red chili peppers, and other ingredients. The bowl is placed on a red placemat with white stripes, and there are lime halves and a small bowl of additional ingredients nearby. The person is wearing a brown apron, suggesting they are preparing food. The setting appears to be a kitchen or dining area, with a casual and homey atmosphere. The camera focuses closely on the bowl and the person's hands, capturing the detailed action of mixing the guacamole.</sub>
+    </td>
+    <td width="50%">
+      <div align="center"><b>Output Image</b></div>
+      <img src="assets/text2image/2.jpg">
+    </td>
+  </tr>
+</table>
+
+### Video2World
+
+<table>
+  <tr>
+    <td colspan="2">
+      <div align="center"><b>Input Prompt</b></div>
+      <sub>A wide-angle shot captures a sunny suburban street intersection, where the bright sunlight casts sharp shadows across the road. The scene is framed by a row of houses with beige and brown roofs, and lush green lawns. Autumn-colored trees add vibrant red and orange hues to the landscape. Overhead power lines stretch across the sky, and a fire hydrant is visible on the right side of the frame near the curb. A silver sedan is parked on the driveway of a house on the left, while a silver SUV is parked on the street in front of the house at the center of the camera view. The ego vehicle waits to turn right at the t-intersection, yielding to two other vehicles traveling in opposite directions. A black car enters the frame from the right, driving across the intersection and continuing straight ahead. The car's movement is smooth and steady, and it exits the frame to the left. The final frame shows the intersection with a vehicle moving from the left to the right side, the silver sedan and the SUV still parked in their initial positions, and the black car having moved out of view.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <div align="center"><b>Input Image</b></div>
+      <img src="assets/video2world/task268.jpg">
+    </td>
+    <td>
+      <div align="center"><b>Output Video</b></div>
+      <video width="512" src="https://github.com/user-attachments/assets/4609f28b-b661-4632-a34e-78c453b2cbde"></video>
+    </td>
+  </tr>
+</table>
+
+<table>
+  <tr>
+    <td colspan="2">
+      <div align="center"><b>Input Prompt</b></div>
+      <sub>The video opens with a view of a testing environment, characterized by a large wooden table at the center. On this table, two robot arms are positioned at opposite ends, with the left arm closer to the camera and the right arm further away. Between the hands lies a dark wooden shelf with a red spherical object on its top rack, likely serving as a platform or obstacle. In the background, various pieces of equipment, including a tripod, a chair, are visible. A person wearing a blue jacket and black pants stands near the center of the room, observing the experiment, with a static hand position throughout. The floor is tiled with a patterned design, and additional items like a small robot figure and some cables can be seen scattered around the space.  As the video progresses, the right robotic hand extends outward, moving from its initial position towards the red spherical object on the shelf. The hand then picks up the object and places it on the lowest rack of the shelf, completing a smooth, deliberate manipulation. The left robotic hand remains stationary throughout the sequence. No new objects appear in the video; all existing elements maintain their positions except for the movement of the right robotic hand. The scene concludes with the right robotic hand returning to its initial position, while the left hand continues to rest on the table. The overall environment remains unchanged, with the focus remaining on the interaction between the robotic hands and the wooden block, highlighting precise control during the demonstration.</sub>
+    </td>
+  </tr>
+  <tr>
+    <td>
+      <div align="center"><b>Input Image</b></div>
+      <img src="assets/video2world/task232.jpg">
+    </td>
+    <td>
+      <div align="center"><b>Output Video</b></div>
+      <video width="512" src="https://github.com/user-attachments/assets/feb5a8e1-2256-4373-9dd5-4145204c65f5"></video>
+    </td>
+  </tr>
+</table>
 
 ## System Requirements
 Cosmos-Predict2 has the following system requirements:
