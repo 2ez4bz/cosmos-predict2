@@ -122,7 +122,6 @@ The following benchmarks provide detailed performance metrics across different G
 | NVIDIA GB200 | 3.39 sec | 8.5 sec | 25.61 sec | 85.26 sec |
 | NVIDIA B200 | 3.24 sec | 8.68 sec | 30.7 sec | 92.59 sec |
 | NVIDIA RTX PRO 6000 Workstation Edition | 5.59 sec | 24.16 sec | 82.43 sec | 321.9 sec |
-| NVIDIA GeForce RTX 5090 | 26.8 sec | 435.02 sec | 209.88 sec | (OOM) |
 | NVIDIA DGX Spark | 24.87 sec | 138.94 sec | 344.64 sec | 1902.26 sec |
 | NVIDIA H200 SXM | 9.02 sec | 15.96 sec | 50.2 sec | 176.19 sec |
 | NVIDIA H200 NVL | 6.34 sec | 16.95 sec | 54.01 sec | 203.56 sec |
