@@ -15,6 +15,26 @@ Cosmos-Predict2 includes the following:
 
 - **Diffusion-based world foundation models** for Text2Image and Video2World generation, where a user can generate visual simulation based on text prompts or video prompts.
 
+<table width="100%" style="table-layout:fixed; border-collapse: collapse;">
+  <tr>
+    <th colspan="2" align="center" style="padding:8px; border:1px solid #444;">
+      Image → Video
+    </th>
+  </tr>
+  <tr>
+    <td width="50%" valign="top" style="padding:8px; border:1px solid #444;">
+      <!-- Replace the src value with your image path -->
+      <img src="" alt="Add Image Here" width="100%" />
+    </td>
+    <td width="50%" valign="top" style="padding:8px; border:1px solid #444;">
+      <!-- Replace the src value with your video path -->
+      <video src="" width="100%" controls>
+        Your browser does not support the video tag.
+      </video>
+    </td>
+  </tr>
+</table>
+
 ## News
 - [2025/05] Initial release of Predict2! This is a major upgrade from Predict1. Please try it out and give us feedback. 
 
