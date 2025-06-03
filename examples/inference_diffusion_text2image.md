@@ -1,5 +1,21 @@
 ## Inference with diffusion-based Text2Image models
 
+### Table of Contents
+- [Environment setup](#environment-setup)
+- [Download checkpoints](#download-checkpoints)
+- [Examples](#examples)
+  - [Example 1: single generation on the 2B model](#example-1-single-generation-on-the-2b-model)
+  - [Example 2: single generation on the 14B model](#example-2-single-generation-on-the-14b-model)
+- [Prompt engineering tips](#prompt-engineering-tips)
+- [API documentation](#api-documentation)
+  - [Basic Arguments](#basic-arguments)
+  - [Model Size and Configuration](#model-size-and-configuration)
+  - [Generation Parameters](#generation-parameters)
+  - [Batch Processing](#batch-processing)
+  - [Performance Optimization](#performance-optimization)
+  - [Prompt Processing](#prompt-processing)
+  - [Safety Features](#safety-features)
+
 ### Environment setup
 
 Please refer to the Inference section of [INSTALL.md](/INSTALL.md#inference) for instructions on environment setup.
