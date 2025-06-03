@@ -186,14 +186,14 @@ The following benchmarks provide detailed performance metrics across different G
 
 The choice between 2B and 14B models depends on your specific needs, hardware constraints, and performance requirements:
 
-#### Use 2B models When:
+#### Use 2B models when:
 - You need faster inference times and lower latency
 - You have limited GPU memory (requires ~26-33GB VRAM)
 - Your use case involves simpler scenes and compositions
 - You're doing rapid prototyping or testing
 - You need to process a large batch of images/videos efficiently
 
-#### Use 14B models When:
+#### Use 14B models when:
 - You need higher quality and more detailed outputs
 - You have sufficient GPU resources (requires ~49-57GB VRAM)
 - Your use case involves complex scenes with intricate details
