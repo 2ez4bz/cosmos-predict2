@@ -50,7 +50,7 @@ We will set prompts with environment variables first.
 Please refer to example inputs in [assets/video2world/](/assets/video2world/).
 Below prompt is from [assets/video2world/input0.txt](/assets/video2world/input0.txt).
 ```bash
-PROMPT="A nighttime city bus terminal gradually shifts from stillness to subtle movement. At first, multiple double-decker buses are parked under the glow of overhead lights, with a central bus labeled “87D” facing forward and stationary. As the video progresses, the bus in the middle moves ahead slowly, its headlights brightening the surrounding area and casting reflections onto adjacent vehicles. The motion creates space in the lineup, signaling activity within the otherwise quiet station. It then comes to a smooth stop, resuming its position in line. Overhead signage in Chinese characters remains illuminated, enhancing the vibrant, urban night scene."
+PROMPT="A nighttime city bus terminal gradually shifts from stillness to subtle movement. At first, multiple double-decker buses are parked under the glow of overhead lights, with a central bus labeled "87D" facing forward and stationary. As the video progresses, the bus in the middle moves ahead slowly, its headlights brightening the surrounding area and casting reflections onto adjacent vehicles. The motion creates space in the lineup, signaling activity within the otherwise quiet station. It then comes to a smooth stop, resuming its position in line. Overhead signage in Chinese characters remains illuminated, enhancing the vibrant, urban night scene."
 
 NEGATIVE_PROMPT="The video captures a series of frames showing ugly scenes, static with no motion, motion blur, over-saturation, shaky footage, low resolution, grainy texture, pixelated images, poorly lit areas, underexposed and overexposed scenes, poor color balance, washed out colors, choppy sequences, jerky movements, low frame rate, artifacting, color banding, unnatural transitions, outdated special effects, fake elements, unconvincing visuals, poorly edited content, jump cuts, visual noise, and flickering. Overall, the video is of poor quality."
 ```
@@ -191,3 +191,49 @@ CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/infer
 To generate physically plausible videos with our video2world models, focus on realistic motion, consistent physics, and coherent environments. Start with a grounded scene. Describe the setting, characters, and actions clearly, such as "a person jogging on a sidewalk while cars pass by on the road." Ensure the initial frame is physically reasonable and sets up logical progression.
 
 Avoid vague or surreal descriptions unless intentional. Instead, use real-world references and focus on how objects and characters interact naturally. Refine prompts based on output to correct issues like jerky motion or lighting inconsistencies. The more your prompt reflects real-world behavior and timing, the more believable the resulting video will be.
+
+### API documentation
+
+The `video2world.py` script supports the following command-line arguments:
+
+#### Basic Arguments
+- `--prompt`: Text prompt describing the video to generate (required if prompt upsampler is disabled)
+- `--negative_prompt`: Text describing what to avoid in the generated video
+- `--input_image_or_video_path`: Path to input image or video file (required)
+- `--checkpoint_dir`: Directory containing model checkpoints (default: "checkpoints")
+- `--diffusion_transformer_dir`: Diffusion model weights directory (choices: "Cosmos-Predict2-2B-Video2World", "Cosmos-Predict2-14B-Video2World")
+- `--video_save_name`: Base name for saved video files (default: "video")
+- `--video_save_folder`: Directory to save output videos (default: "outputs")
+- `--seed`: Random seed for reproducible results (default: 42)
+
+#### Model Size and Configuration
+- `--num_gpus`: Number of GPUs to use for distributed inference
+- `--num_input_frames`: Number of input frames for video2world prediction (choices: 1, 9, default: 1)
+
+#### Generation Parameters
+- `--guidance`: Classifier-free guidance scale (default: 7.5)
+- `--num_steps`: Number of diffusion steps (default: 50)
+- `--height`: Height of generated video (default: 432)
+- `--width`: Width of generated video (default: 768)
+- `--fps`: Frames per second for generated video (default: 30)
+- `--num_video_frames`: Number of frames in generated video (default: 81)
+
+#### Batch Processing
+- `--batch_input_path`: Path to JSONL file containing multiple prompts and visual inputs
+
+#### Performance Optimization
+- `--offload_diffusion_transformer`: Offload diffusion model to CPU when not in use
+- `--offload_tokenizer`: Offload tokenizer to CPU when not in use
+- `--offload_text_encoder_model`: Offload text encoder to CPU when not in use
+- `--offload_prompt_upsampler`: Offload prompt upsampler to CPU when not in use
+- `--offload_guardrail_models`: Offload guardrail models to CPU when not in use
+- `--use_cuda_graphs`: Use CUDA Graphs for inference acceleration
+
+#### Prompt Processing
+- `--disable_prompt_upsampler`: Disable prompt upsampling
+- `--prompt_upsampler_dir`: Prompt upsampler weights directory (default: "Pixtral-12B")
+
+#### Safety Features
+- `--disable_guardrail`: Disable safety guardrails
+
+

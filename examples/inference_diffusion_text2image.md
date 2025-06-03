@@ -136,3 +136,46 @@ CUDA_HOME=$CONDA_PREFIX PYTHONPATH=$(pwd) python cosmos_predict2/diffusion/infer
 To generate physically plausible images with our text2image models, focus on realistic detail, accurate proportions, and logically consistent environments. Be specific about the subject, action, and context. Describe materials, lighting, and object sizes relative to one another. For example, use "a two-story brick house with a tiled roof on a concrete foundation in a suburban neighborhood under natural daylight" instead of vague or surreal descriptions.
 
 Incorporate references to real-world materials or photography terms like "depth of field", "natural lighting", or "wide-angle lens" to guide the model toward physically grounded results. Avoid abstract or artistic modifiers unless you're intentionally going for surrealism. Review your prompt to ensure each element could exist and behave naturally, and refine as needed for coherence and believability.
+
+### API documentation
+
+The `text2image.py` script supports the following command-line arguments:
+
+#### Basic Arguments
+- `--prompt`: Text prompt describing the image to generate (required)
+- `--negative_prompt`: Text describing what to avoid in the generated image
+- `--checkpoint_dir`: Directory containing model checkpoints (default: "checkpoints")
+- `--diffusion_transformer_dir`: Diffusion model weights directory (choices: "Cosmos-Predict2-2B-Text2Image", "Cosmos-Predict2-14B-Text2Image")
+- `--image_save_name`: Base name for saved image files (default: "image")
+- `--image_save_folder`: Directory to save output images (default: "outputs")
+- `--seed`: Random seed for reproducible results (default: 42)
+
+#### Model Size and Configuration
+- `--num_gpus`: Number of GPUs to use for distributed inference
+
+#### Generation Parameters
+- `--guidance`: Classifier-free guidance scale (default: 7.5)
+- `--num_steps`: Number of diffusion steps (default: 50)
+- `--height`: Height of generated image (default: 512)
+- `--width`: Width of generated image (default: 512)
+
+#### Batch Processing
+- `--batch_input_path`: Path to JSONL file containing multiple prompts
+
+#### Performance Optimization
+- `--offload_diffusion_transformer`: Offload diffusion model to CPU when not in use
+- `--offload_tokenizer`: Offload tokenizer to CPU when not in use
+- `--offload_text_encoder_model`: Offload text encoder to CPU when not in use
+- `--offload_prompt_upsampler`: Offload prompt upsampler to CPU when not in use
+- `--offload_guardrail_models`: Offload guardrail models to CPU when not in use
+- `--use_cuda_graphs`: Use CUDA Graphs for inference acceleration
+
+#### Prompt Processing
+- `--disable_prompt_upsampler`: Disable prompt upsampling
+- `--prompt_upsampler_dir`: Prompt upsampler weights directory
+- `--word_limit_to_skip_upsampler`: Skip upsampler if prompt exceeds this word count (default: 250)
+
+#### Safety Features
+- `--disable_guardrail`: Disable safety guardrails
+
+
