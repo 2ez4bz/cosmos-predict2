@@ -39,10 +39,11 @@ Cosmos-Predict2 includes the following:
 - [2025/05] Initial release of Predict2! This is a major upgrade from Predict1. Please try it out and give us feedback. 
 
 ## System Requirements
-
-Cosmos-Predict2 requires:
-* Linux operating system (tested with Ubuntu 20.04, 22.04, and 24.04)
-* NVIDIA GPUs with Ampere architecture (RTX 30 Series, A100) or newer. See our [Performance Benchmarks](#performance-benchmarks) for detailed hardware requirements and recommendations.
+Cosmos-Predict2 has the following system requirements:
+* NVIDIA GPUs with Ampere architecture (RTX 30 Series, A100) or newer architectures. For detailed hardware requirements and recommendations, please refer to our [performance benchmarks](#performance-benchmarks).
+* Linux operating system (Ubuntu 20.04, 22.04, or 24.04 LTS)
+* CUDA version 12.4 or later
+* Python version 3.10 or later
 
 ## Documentation
 See below for quickstart installation and usage examples. 
