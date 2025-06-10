@@ -14,13 +14,15 @@ mediapy==1.2.2
 megatron-core==0.10.0
 nltk==3.9.1
 numpy==1.26.4
-nvidia-ml-py==12.535.133
+# Due to vllm.
+nvidia-ml-py==12.560.30
 omegaconf==2.3.0
 opencv-python==4.10.0.84
 pandas==2.2.3
 peft==0.14.0
-pillow==11.1.0
-protobuf==4.25.3
+pillow>=10.3.0
+# nimlib / triton -> opentelemetry-exporter-otlp-proto-http -> protobuf
+protobuf~=5.0
 pynvml==12.0.0
 pyyaml==6.0.2
 retinaface-py==0.0.2
@@ -29,8 +31,12 @@ scikit-image==0.25.2
 sentencepiece==0.2.0
 setuptools==76.0.0
 termcolor==2.5.0
-torch==2.6.0
-torchvision==0.21.0
+# tensorrt_llm / vllm -> internal torch 2.7.0a[...] + torchvision 0.22.0a[...]
+torch>=2.6.0
+torchvision>=0.21.0
 tqdm==4.66.5
-transformers==4.49.0
+# This was originally pinned to 4.49.0, which is actually a minimum dependency, since there are
+# some Qwen-related models that are not in any 4.48.x. However, that would lead to poetry being
+# unable to resolve dependencies in the NIM cosmos SDK.
+transformers>=4.48.0
 qwen-vl-utils[decord]==0.0.11
