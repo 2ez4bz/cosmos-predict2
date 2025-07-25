@@ -736,8 +736,8 @@ class TokenizerInterface(VideoTokenizerInterface):
                 "",
             ),
             temporal_window=kwargs.get("temporal_window", 4),
+            device=kwargs.get("device", "cuda"),
         )
-        del kwargs
         self.chunk_duration = chunk_duration
 
     @property

@@ -164,6 +164,9 @@ def parse_args() -> argparse.Namespace:
         help="Run the generation in benchmark mode. It means that generation will be rerun a few times and the average generation time will be shown.",
     )
     parser.add_argument("--use_cuda_graphs", action="store_true", help="Use CUDA Graphs for the text2image inference.")
+    parser.add_argument(
+        "--device", type=str, default="cuda:1", help="Device to use for inference (e.g., 'cuda:0', 'cuda:1')"
+    )
     return parser.parse_args()
 
 
@@ -244,7 +247,7 @@ def setup_pipeline(args: argparse.Namespace, text_encoder=None):
         config=config,
         dit_path=dit_path,
         text_encoder_path=text_encoder_path,
-        device="cuda",
+        device=args.device,
         torch_dtype=torch.bfloat16,
         load_prompt_refiner=True,
     )
@@ -268,6 +271,7 @@ def process_single_generation(
     seed: int,
     benchmark: bool = False,
     use_cuda_graphs: bool = False,
+    device: str = "cuda",
 ) -> bool:
     # Validate input file
     if not validate_input_file(input_path, num_conditional_frames):
@@ -291,6 +295,7 @@ def process_single_generation(
             guidance=guidance,
             seed=seed,
             use_cuda_graphs=use_cuda_graphs,
+            device=device,
         )
         if benchmark and i > 0:
             torch.cuda.synchronize()
@@ -351,6 +356,7 @@ def generate_video(args: argparse.Namespace, pipe: Video2WorldPipeline) -> None:
                 seed=args.seed,
                 benchmark=args.benchmark,
                 use_cuda_graphs=args.use_cuda_graphs,
+                device=args.device,
             )
     else:
         process_single_generation(
@@ -365,6 +371,7 @@ def generate_video(args: argparse.Namespace, pipe: Video2WorldPipeline) -> None:
             seed=args.seed,
             benchmark=args.benchmark,
             use_cuda_graphs=args.use_cuda_graphs,
+            device=args.device,
         )
 
     return

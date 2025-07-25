@@ -274,6 +274,7 @@ class Video2WorldPipeline(BasePipeline):
         self.height_division_factor = 16
         self.width_division_factor = 16
         self.use_unified_sequence_parallel = False
+        self.device = device
 
     @staticmethod
     def from_config(
@@ -286,13 +287,14 @@ class Video2WorldPipeline(BasePipeline):
     ) -> Any:
         # Create a pipe
         pipe = Video2WorldPipeline(device=device, torch_dtype=torch_dtype)
+        config.tokenizer.device = device
         pipe.config = config
         pipe.precision = {
             "float32": torch.float32,
             "float16": torch.float16,
             "bfloat16": torch.bfloat16,
         }[config.precision]
-        pipe.tensor_kwargs = {"device": "cuda", "dtype": pipe.precision}
+        pipe.tensor_kwargs = {"device": device, "dtype": pipe.precision}
         log.warning(f"precision {pipe.precision}")
 
         # 1. set data keys and data information
@@ -310,6 +312,7 @@ class Video2WorldPipeline(BasePipeline):
         pipe.scaling = RectifiedFlowScaling(pipe.sigma_data, config.rectified_flow_t_scaling_factor)
 
         # 3. Set up tokenizer
+        #pipe.tokenizer = instantiate(config.tokenizer, device=device)
         pipe.tokenizer = instantiate(config.tokenizer)
         assert (
             pipe.tokenizer.latent_ch == pipe.config.state_ch
@@ -319,6 +322,8 @@ class Video2WorldPipeline(BasePipeline):
         if text_encoder_path:
             # inference
             pipe.text_encoder = CosmosT5TextEncoder(device=device, cache_dir=text_encoder_path)
+            torch.cuda.set_device(device)
+            #device = torch.device("cuda")
             pipe.text_encoder.to(device)
         else:
             # training
@@ -452,7 +457,7 @@ class Video2WorldPipeline(BasePipeline):
         # Move tensors to GPU and convert to bfloat16 if they are floating point
         for k, v in data_batch.items():
             if isinstance(v, torch.Tensor) and torch.is_floating_point(data_batch[k]):
-                data_batch[k] = v.cuda().to(dtype=torch.bfloat16)
+                data_batch[k] = v.to(self.device).to(dtype=torch.bfloat16)
 
         return data_batch
 
@@ -504,7 +509,8 @@ class Video2WorldPipeline(BasePipeline):
                 ), f"Video data is not in the range [-1, 1]. get data range [{data_batch[input_key].min()}, {data_batch[input_key].max()}]"
             else:
                 assert data_batch[input_key].dtype == torch.uint8, "Video data is not in uint8 format."
-                data_batch[input_key] = data_batch[input_key].to(**self.tensor_kwargs) / 127.5 - 1.0
+                #                data_batch[input_key] = data_batch[input_key].to(**self.tensor_kwargs) / 127.5 - 1.0
+                data_batch[input_key] = data_batch[input_key].to(self.device).to(dtype=torch.bfloat16)  / 127.5 - 1.0
                 data_batch[IS_PREPROCESSED_KEY] = True
 
             if self.config.resize_online:
@@ -532,6 +538,7 @@ class Video2WorldPipeline(BasePipeline):
 
     @torch.no_grad()
     def encode(self, state: torch.Tensor) -> torch.Tensor:
+        #state.to(self.device)
         return self.tokenizer.encode(state) * self.sigma_data
 
     @staticmethod
@@ -781,6 +788,7 @@ class Video2WorldPipeline(BasePipeline):
         num_sampling_step: int = 35,
         seed: int = 0,
         use_cuda_graphs: bool = False,
+        device: str = "cuda",
     ) -> torch.Tensor | None:
         # Parameter check
         width, height = VIDEO_RES_SIZE_INFO[self.config.resolution][aspect_ratio]
