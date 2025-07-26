@@ -102,25 +102,35 @@ class AllowedTokensLogitsProcessor(LogitsProcessor):
 
 
 class CosmosReason1(torch.nn.Module):
-    def __init__(self, checkpoint_dir: str, offload_model_to_cpu: bool = True, enabled: bool = True):
+    def __init__(
+        self,
+        checkpoint_dir: str,
+        offload_model_to_cpu: bool = True,
+        enabled: bool = True,
+        device: str | torch.device = "cuda",
+    ):
         """Cosmos Reason1 model for prompt refinement.
 
         Args:
             checkpoint_dir (str): Path to the checkpoint directory.
             offload_model_to_cpu (bool, optional): Whether to offload the model to CPU. Defaults to True.
             enabled (bool, optional): Whether to enable the model. Defaults to True.
+            device (str | torch.device, optional): The device to load the model on. Defaults to "cuda".
         """
         super().__init__()
+        self.device = torch.device(device)
         min_pixels = 256 * 28 * 28
         max_pixels = 1280 * 28 * 28
         self.processor = AutoProcessor.from_pretrained(
             checkpoint_dir, min_pixels=min_pixels, max_pixels=max_pixels, use_fast=True
         )
+
+        device_map = "cpu" if offload_model_to_cpu else self.device
         self.model = Qwen2_5_VLForConditionalGeneration.from_pretrained(
             checkpoint_dir,
             torch_dtype=torch.bfloat16,
             attn_implementation="flash_attention_2",
-            device_map="cpu",
+            device_map=device_map,
             use_cache=True,
         )
         self.offload_model = offload_model_to_cpu
@@ -128,10 +138,10 @@ class CosmosReason1(torch.nn.Module):
         self._compute_allowed_token_ids()
         # move model to GPU if not offload_model_to_cpu and enabled
         if not offload_model_to_cpu and self.enabled:
-            self.model = self.model.to("cuda")
-            log.debug("Move Reason1 model to GPU")
+            self.model = self.model.to(self.device)
+            log.debug(f"Moved Reason1 model to {self.device}")
 
-    def _compute_allowed_token_ids(self):
+    def _compute_allowed_token_ids(self) -> None:
         """Pre-compute allowed token IDs for ASCII characters to avoid repeated computation."""
         log.debug("Pre-computing allowed token IDs for ASCII characters...")
         # Get all token IDs
@@ -185,8 +195,8 @@ class CosmosReason1(torch.nn.Module):
         # prompt refinement
         dialog = self.prepare_dialog(image_or_video_path, prompt)
         if self.offload_model:
-            self.model = self.model.to("cuda")
-            log.debug("Move Reason1 model to GPU")
+            self.model = self.model.to(self.device)
+            log.debug(f"Moved Reason1 model to {self.device}")
         text = self.processor.apply_chat_template(dialog, tokenize=False, add_generation_prompt=True)
         image_inputs, video_inputs = process_vision_info(dialog)
         inputs = self.processor(
@@ -197,7 +207,7 @@ class CosmosReason1(torch.nn.Module):
             return_tensors="pt",
         )
         # Inference: Generation of the output
-        inputs = inputs.to("cuda")
+        inputs = inputs.to(self.device)
         logits_processor = LogitsProcessorList([AllowedTokensLogitsProcessor(self.allowed_token_ids)])
         generated_ids = self.model.generate(**inputs, max_new_tokens=512, logits_processor=logits_processor)
         generated_ids_trimmed = [out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, generated_ids)]
@@ -212,8 +222,8 @@ class CosmosReason1(torch.nn.Module):
 
     def analyze_video(self, video_path: str, num_trials: int = 1, seed: int | None = None) -> str:
         if self.offload_model:
-            self.model = self.model.to("cuda")
-            log.debug("Move Reason1 model to GPU")
+            self.model = self.model.to(self.device)
+            log.debug(f"Moved Reason1 model to {self.device}")
         dialog = [
             {
                 "role": "system",
@@ -237,7 +247,7 @@ class CosmosReason1(torch.nn.Module):
             **video_kwargs,
         )
         # Inference: Generation of the output
-        inputs = inputs.to("cuda")
+        inputs = inputs.to(self.device)
         if seed is not None:
             set_seed(seed)
         generated_ids = self.model.generate(
@@ -260,5 +270,5 @@ class CosmosReason1(torch.nn.Module):
 
 
 if __name__ == "__main__":
-    model = CosmosReason1("checkpoints/nvidia/Cosmos-Reason1-7B")
+    model = CosmosReason1("checkpoints/nvidia/Cosmos-Reason1-7B", device="cuda:0")
     print(model.refine_prompt("assets/video2world/input0.jpg", "A bus terminal in the city."))

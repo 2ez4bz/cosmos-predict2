@@ -32,15 +32,18 @@ class LlamaGuard3(ContentSafetyGuardrail):
         self,
         checkpoint_dir: str,
         offload_model_to_cpu: bool = True,
+        device: str | torch.device = "cuda",
     ) -> None:
         """Llama Guard 3 model for text filtering safety check.
 
         Args:
             checkpoint_dir (str): Path to the checkpoint directory.
             offload_model_to_cpu (bool, optional): Whether to offload the model to CPU. Defaults to True.
+            device (str | torch.device, optional): The device to load the model on. Defaults to "cuda".
         """
         self.checkpoint_dir = checkpoint_dir
         self.offload_model = offload_model_to_cpu
+        self.device = torch.device(device)
         self.dtype = torch.bfloat16
 
         model_id = "meta-llama/Llama-Guard-3-8B"
@@ -51,8 +54,8 @@ class LlamaGuard3(ContentSafetyGuardrail):
 
         # Move model to GPU unless offload_model_to_cpu is True
         if not offload_model_to_cpu:
-            self.model = self.model.to("cuda", dtype=self.dtype).eval()
-            log.debug("Moved llamaGuard3 model to GPU")
+            self.model = self.model.to(self.device, dtype=self.dtype).eval()
+            log.debug(f"Moved llamaGuard3 model to {self.device}")
         else:
             self.model = self.model.to("cpu", dtype=self.dtype).eval()
             log.debug("Moved llamaGuard3 model to CPU")
@@ -82,11 +85,11 @@ class LlamaGuard3(ContentSafetyGuardrail):
         """Filter the Llama Guard 3 model output and return the safety status and message."""
         conversation = [{"role": "user", "content": prompt}]
         if self.offload_model:
-            self.model = self.model.to("cuda")
-            log.debug("Move llamaGuard3 model to GPU")
+            self.model = self.model.to(self.device)
+            log.debug(f"Move llamaGuard3 model to {self.device}")
         input_ids = self.tokenizer.apply_chat_template(
             conversation, categories=UNSAFE_CATEGORIES, return_tensors="pt"
-        ).to("cuda")
+        ).to(self.device)
         prompt_len = input_ids.shape[1]
         output = self.model.generate(
             input_ids=input_ids,

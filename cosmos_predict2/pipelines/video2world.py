@@ -274,7 +274,7 @@ class Video2WorldPipeline(BasePipeline):
         self.height_division_factor = 16
         self.width_division_factor = 16
         self.use_unified_sequence_parallel = False
-        self.device = device
+        self.device = torch.device(device)
 
     @staticmethod
     def from_config(
@@ -287,14 +287,14 @@ class Video2WorldPipeline(BasePipeline):
     ) -> Any:
         # Create a pipe
         pipe = Video2WorldPipeline(device=device, torch_dtype=torch_dtype)
-        config.tokenizer.device = device
+        config.tokenizer.device = pipe.device
         pipe.config = config
         pipe.precision = {
             "float32": torch.float32,
             "float16": torch.float16,
             "bfloat16": torch.bfloat16,
         }[config.precision]
-        pipe.tensor_kwargs = {"device": device, "dtype": pipe.precision}
+        pipe.tensor_kwargs = {"device": pipe.device, "dtype": pipe.precision}
         log.warning(f"precision {pipe.precision}")
 
         # 1. set data keys and data information
@@ -312,7 +312,6 @@ class Video2WorldPipeline(BasePipeline):
         pipe.scaling = RectifiedFlowScaling(pipe.sigma_data, config.rectified_flow_t_scaling_factor)
 
         # 3. Set up tokenizer
-        #pipe.tokenizer = instantiate(config.tokenizer, device=device)
         pipe.tokenizer = instantiate(config.tokenizer)
         assert (
             pipe.tokenizer.latent_ch == pipe.config.state_ch
@@ -321,10 +320,8 @@ class Video2WorldPipeline(BasePipeline):
         # 4. Load text encoder
         if text_encoder_path:
             # inference
-            pipe.text_encoder = CosmosT5TextEncoder(device=device, cache_dir=text_encoder_path)
-            torch.cuda.set_device(device)
-            #device = torch.device("cuda")
-            pipe.text_encoder.to(device)
+            pipe.text_encoder = CosmosT5TextEncoder(device=pipe.device, cache_dir=text_encoder_path)
+            pipe.text_encoder.to(pipe.device)
         else:
             # training
             pipe.text_encoder = None
@@ -340,16 +337,21 @@ class Video2WorldPipeline(BasePipeline):
                 checkpoint_dir=config.prompt_refiner_config.checkpoint_dir,
                 offload_model_to_cpu=config.prompt_refiner_config.offload_model_to_cpu,
                 enabled=config.prompt_refiner_config.enabled,
+                device=pipe.device,
             )
 
         if config.guardrail_config.enabled:
             from cosmos_predict2.auxiliary.guardrail.common import presets as guardrail_presets
 
             pipe.text_guardrail_runner = guardrail_presets.create_text_guardrail_runner(
-                config.guardrail_config.checkpoint_dir, config.guardrail_config.offload_model_to_cpu
+                config.guardrail_config.checkpoint_dir,
+                config.guardrail_config.offload_model_to_cpu,
+                device=pipe.device,
             )
             pipe.video_guardrail_runner = guardrail_presets.create_video_guardrail_runner(
-                config.guardrail_config.checkpoint_dir, config.guardrail_config.offload_model_to_cpu
+                config.guardrail_config.checkpoint_dir,
+                config.guardrail_config.offload_model_to_cpu,
+                device=pipe.device,
             )
         else:
             pipe.text_guardrail_runner = None
@@ -390,7 +392,7 @@ class Video2WorldPipeline(BasePipeline):
             # Actual state_dict should be loaded after the pipe is created.
             pipe.dit_ema_worker.copy_to(src_model=pipe.dit, tgt_model=pipe.dit_ema)
 
-        pipe.dit = pipe.dit.to(device=device, dtype=torch_dtype)
+        pipe.dit = pipe.dit.to(device=pipe.device, dtype=torch_dtype)
         torch.cuda.empty_cache()
 
         # 7. training states
@@ -538,7 +540,6 @@ class Video2WorldPipeline(BasePipeline):
 
     @torch.no_grad()
     def encode(self, state: torch.Tensor) -> torch.Tensor:
-        #state.to(self.device)
         return self.tokenizer.encode(state) * self.sigma_data
 
     @staticmethod
@@ -788,182 +789,183 @@ class Video2WorldPipeline(BasePipeline):
         num_sampling_step: int = 35,
         seed: int = 0,
         use_cuda_graphs: bool = False,
-        device: str = "cuda",
+        #device: str = "cuda",
     ) -> torch.Tensor | None:
-        # Parameter check
-        width, height = VIDEO_RES_SIZE_INFO[self.config.resolution][aspect_ratio]
-        height, width = self.check_resize_height_width(height, width)
-        assert num_conditional_frames in [1, 5], "num_conditional_frames must be 1 or 5"
-        num_latent_conditional_frames = self.tokenizer.get_latent_num_frames(num_conditional_frames)
+        with torch.cuda.device(self.device):
+            # Parameter check
+            width, height = VIDEO_RES_SIZE_INFO[self.config.resolution][aspect_ratio]
+            height, width = self.check_resize_height_width(height, width)
+            assert num_conditional_frames in [1, 5], "num_conditional_frames must be 1 or 5"
+            num_latent_conditional_frames = self.tokenizer.get_latent_num_frames(num_conditional_frames)
 
-        # Run text guardrail on the prompt
-        if self.text_guardrail_runner is not None:
-            from cosmos_predict2.auxiliary.guardrail.common import presets as guardrail_presets
-
-            log.info("Running guardrail check on prompt...")
-            if not guardrail_presets.run_text_guardrail(prompt, self.text_guardrail_runner):
-                return None
-            else:
-                log.success("Passed guardrail on prompt")
-        elif self.text_guardrail_runner is None:
-            log.warning("Guardrail checks on prompt are disabled")
-
-        # refine prompt only if prompt refiner is enabled
-        if (
-            hasattr(self, "prompt_refiner")
-            and self.prompt_refiner is not None
-            and getattr(self.config, "prompt_refiner_config", None)
-            and getattr(self.config.prompt_refiner_config, "enabled", False)
-        ):
-            log.info("Starting prompt refinement...")
-            prompt = self.prompt_refiner.refine_prompt(input_path, prompt)
-            log.info("Finished prompt refinement")
-
-            # Run text guardrail on the refined prompt
+            # Run text guardrail on the prompt
             if self.text_guardrail_runner is not None:
-                log.info("Running guardrail check on refined prompt...")
+                from cosmos_predict2.auxiliary.guardrail.common import presets as guardrail_presets
+
+                log.info("Running guardrail check on prompt...")
                 if not guardrail_presets.run_text_guardrail(prompt, self.text_guardrail_runner):
                     return None
                 else:
-                    log.success("Passed guardrail on refined prompt")
+                    log.success("Passed guardrail on prompt")
             elif self.text_guardrail_runner is None:
-                log.warning("Guardrail checks on refined prompt are disabled")
-        elif (
-            hasattr(self, "config")
-            and hasattr(self.config, "prompt_refiner_config")
-            and not self.config.prompt_refiner_config.enabled
-        ):
-            log.warning("Prompt refinement is disabled")
+                log.warning("Guardrail checks on prompt are disabled")
 
-        num_video_frames = self.tokenizer.get_pixel_num_frames(self.config.state_t)
+            # refine prompt only if prompt refiner is enabled
+            if (
+                hasattr(self, "prompt_refiner")
+                and self.prompt_refiner is not None
+                and getattr(self.config, "prompt_refiner_config", None)
+                and getattr(self.config.prompt_refiner_config, "enabled", False)
+            ):
+                log.info("Starting prompt refinement...")
+                prompt = self.prompt_refiner.refine_prompt(input_path, prompt)
+                log.info("Finished prompt refinement")
 
-        # Detect file extension to determine appropriate reading function
-        ext = os.path.splitext(input_path)[1].lower()
-        if ext in _VIDEO_EXTENSIONS:
-            # Always use video reading for video files, regardless of num_latent_conditional_frames
-            vid_input = read_and_process_video(
-                input_path, [height, width], num_video_frames, num_latent_conditional_frames, resize=True
-            )
-        elif ext in _IMAGE_EXTENSIONS:
-            if num_latent_conditional_frames == 1:
-                # Use image reading for single frame conditioning with image files
-                vid_input = read_and_process_image(input_path, [height, width], num_video_frames, resize=True)
+                # Run text guardrail on the refined prompt
+                if self.text_guardrail_runner is not None:
+                    log.info("Running guardrail check on refined prompt...")
+                    if not guardrail_presets.run_text_guardrail(prompt, self.text_guardrail_runner):
+                        return None
+                    else:
+                        log.success("Passed guardrail on refined prompt")
+                elif self.text_guardrail_runner is None:
+                    log.warning("Guardrail checks on refined prompt are disabled")
+            elif (
+                hasattr(self, "config")
+                and hasattr(self.config, "prompt_refiner_config")
+                and not self.config.prompt_refiner_config.enabled
+            ):
+                log.warning("Prompt refinement is disabled")
+
+            num_video_frames = self.tokenizer.get_pixel_num_frames(self.config.state_t)
+
+            # Detect file extension to determine appropriate reading function
+            ext = os.path.splitext(input_path)[1].lower()
+            if ext in _VIDEO_EXTENSIONS:
+                # Always use video reading for video files, regardless of num_latent_conditional_frames
+                vid_input = read_and_process_video(
+                    input_path, [height, width], num_video_frames, num_latent_conditional_frames, resize=True
+                )
+            elif ext in _IMAGE_EXTENSIONS:
+                if num_latent_conditional_frames == 1:
+                    # Use image reading for single frame conditioning with image files
+                    vid_input = read_and_process_image(input_path, [height, width], num_video_frames, resize=True)
+                else:
+                    raise ValueError(
+                        f"Cannot use multi-frame conditioning (num_conditional_frames={num_conditional_frames}) with image input. Please provide a video file."
+                    )
             else:
                 raise ValueError(
-                    f"Cannot use multi-frame conditioning (num_conditional_frames={num_conditional_frames}) with image input. Please provide a video file."
+                    f"Unsupported file extension: {ext}. Supported extensions are {_IMAGE_EXTENSIONS + _VIDEO_EXTENSIONS}"
                 )
-        else:
-            raise ValueError(
-                f"Unsupported file extension: {ext}. Supported extensions are {_IMAGE_EXTENSIONS + _VIDEO_EXTENSIONS}"
+
+            # Prepare the data batch with text embeddings
+            data_batch = self._get_data_batch_input(
+                vid_input, prompt, negative_prompt, num_latent_conditional_frames=num_latent_conditional_frames
             )
 
-        # Prepare the data batch with text embeddings
-        data_batch = self._get_data_batch_input(
-            vid_input, prompt, negative_prompt, num_latent_conditional_frames=num_latent_conditional_frames
-        )
+            # preprocess
+            self._normalize_video_databatch_inplace(data_batch)
+            self._augment_image_dim_inplace(data_batch)
+            is_image_batch = self.is_image_batch(data_batch)
+            input_key = self.input_image_key if is_image_batch else self.input_video_key
+            n_sample = data_batch[input_key].shape[0]
+            _T, _H, _W = data_batch[input_key].shape[-3:]
+            state_shape = [
+                self.config.state_ch,
+                self.tokenizer.get_latent_num_frames(_T),
+                _H // self.tokenizer.spatial_compression_factor,
+                _W // self.tokenizer.spatial_compression_factor,
+            ]
 
-        # preprocess
-        self._normalize_video_databatch_inplace(data_batch)
-        self._augment_image_dim_inplace(data_batch)
-        is_image_batch = self.is_image_batch(data_batch)
-        input_key = self.input_image_key if is_image_batch else self.input_video_key
-        n_sample = data_batch[input_key].shape[0]
-        _T, _H, _W = data_batch[input_key].shape[-3:]
-        state_shape = [
-            self.config.state_ch,
-            self.tokenizer.get_latent_num_frames(_T),
-            _H // self.tokenizer.spatial_compression_factor,
-            _W // self.tokenizer.spatial_compression_factor,
-        ]
-
-        x0_fn = self.get_x0_fn_from_batch(
-            data_batch, guidance, is_negative_prompt=True, use_cuda_graphs=use_cuda_graphs
-        )
-
-        log.info("Starting video generation...")
-
-        x_sigma_max = (
-            misc.arch_invariant_rand(
-                (n_sample,) + tuple(state_shape),
-                torch.float32,
-                self.tensor_kwargs["device"],
-                seed,
-            )
-            * self.scheduler.config.sigma_max
-        )
-
-        # Split the input data and condition for model parallelism, if context parallelism is enabled.
-        if self.dit.is_context_parallel_enabled:
-            x_sigma_max = split_inputs_cp(x=x_sigma_max, seq_dim=2, cp_group=self.get_context_parallel_group())
-
-        # ------------------------------------------------------------------ #
-        # Sampling loop driven by `RectifiedFlowAB2Scheduler`
-        # ------------------------------------------------------------------ #
-        scheduler = self.scheduler
-
-        # Construct sigma schedule (L + 1 entries including simga_min) and timesteps
-        scheduler.set_timesteps(num_sampling_step, device=x_sigma_max.device)
-
-        # Bring the initial latent into the precision expected by the scheduler
-        sample = x_sigma_max.to(dtype=torch.float32)
-
-        x0_prev: torch.Tensor | None = None
-
-        for i, _ in enumerate(tqdm(scheduler.timesteps, desc="Generating world", leave=False)):
-            # Current noise level (sigma_t).
-            sigma_t = scheduler.sigmas[i].to(sample.device, dtype=torch.float32)
-
-            # `x0_fn` expects `sigma` as a tensor of shape [B] or [B, T]. We
-            # pass a 1-D tensor broadcastable to any later shape handling.
-            sigma_in = sigma_t.repeat(sample.shape[0])
-
-            # x0 prediction with conditional and unconditional branches
-            x0_pred = x0_fn(sample, sigma_in)
-
-            # Scheduler step updates the noisy sample and returns the cached x0.
-            sample, x0_prev = scheduler.step(
-                x0_pred=x0_pred,
-                i=i,
-                sample=sample,
-                x0_prev=x0_prev,
+            x0_fn = self.get_x0_fn_from_batch(
+                data_batch, guidance, is_negative_prompt=True, use_cuda_graphs=use_cuda_graphs
             )
 
-        # Final clean pass at sigma_min.
-        sigma_min = scheduler.sigmas[-1].to(sample.device, dtype=torch.float32)
-        sigma_in = sigma_min.repeat(sample.shape[0])
-        samples = x0_fn(sample, sigma_in)
+            log.info("Starting video generation...")
 
-        # Merge context-parallel chunks back together if needed.
-        if self.dit.is_context_parallel_enabled:
-            samples = cat_outputs_cp(samples, seq_dim=2, cp_group=self.get_context_parallel_group())
+            x_sigma_max = (
+                misc.arch_invariant_rand(
+                    (n_sample,) + tuple(state_shape),
+                    torch.float32,
+                    self.tensor_kwargs["device"],
+                    seed,
+                )
+                * self.scheduler.config.sigma_max
+            )
 
-        # Decode
-        video = self.decode(samples)  # shape: (B, C, T, H, W), possibly out of [-1, 1]
+            # Split the input data and condition for model parallelism, if context parallelism is enabled.
+            if self.dit.is_context_parallel_enabled:
+                x_sigma_max = split_inputs_cp(x=x_sigma_max, seq_dim=2, cp_group=self.get_context_parallel_group())
 
-        # Run video guardrail on the generated video and apply postprocessing
-        if self.video_guardrail_runner is not None:
-            # Clamp to safe range before normalization
-            video = video.clamp(-1.0, 1.0)
-            video_normalized = (video + 1) / 2  # [0, 1]
+            # ------------------------------------------------------------------ #
+            # Sampling loop driven by `RectifiedFlowAB2Scheduler`
+            # ------------------------------------------------------------------ #
+            scheduler = self.scheduler
 
-            # Convert tensor to NumPy frames for guardrail processing
-            video_squeezed = video_normalized.squeeze(0)  # (C, T, H, W)
-            frames = (video_squeezed * 255).clamp(0, 255).to(torch.uint8)
-            frames = frames.permute(1, 2, 3, 0).cpu().numpy()  # (T, H, W, C)
+            # Construct sigma schedule (L + 1 entries including simga_min) and timesteps
+            scheduler.set_timesteps(num_sampling_step, device=x_sigma_max.device)
 
-            # Run guardrail
-            processed_frames = guardrail_presets.run_video_guardrail(frames, self.video_guardrail_runner)
-            if processed_frames is None:
-                return None
-            else:
-                log.success("Passed guardrail on generated video")
+            # Bring the initial latent into the precision expected by the scheduler
+            sample = x_sigma_max.to(dtype=torch.float32)
 
-            # Convert processed frames back to tensor format
-            processed_video = torch.from_numpy(processed_frames).float().permute(3, 0, 1, 2) / 255.0
-            processed_video = processed_video * 2 - 1  # back to [-1, 1]
-            processed_video = processed_video.unsqueeze(0)
+            x0_prev: torch.Tensor | None = None
 
-            video = processed_video.to(video.device, dtype=video.dtype)
+            for i, _ in enumerate(tqdm(scheduler.timesteps, desc="Generating world", leave=False)):
+                # Current noise level (sigma_t).
+                sigma_t = scheduler.sigmas[i].to(sample.device, dtype=torch.float32)
 
-        log.success("Video generation completed successfully")
-        return video
+                # `x0_fn` expects `sigma` as a tensor of shape [B] or [B, T]. We
+                # pass a 1-D tensor broadcastable to any later shape handling.
+                sigma_in = sigma_t.repeat(sample.shape[0])
+
+                # x0 prediction with conditional and unconditional branches
+                x0_pred = x0_fn(sample, sigma_in)
+
+                # Scheduler step updates the noisy sample and returns the cached x0.
+                sample, x0_prev = scheduler.step(
+                    x0_pred=x0_pred,
+                    i=i,
+                    sample=sample,
+                    x0_prev=x0_prev,
+                )
+
+            # Final clean pass at sigma_min.
+            sigma_min = scheduler.sigmas[-1].to(sample.device, dtype=torch.float32)
+            sigma_in = sigma_min.repeat(sample.shape[0])
+            samples = x0_fn(sample, sigma_in)
+
+            # Merge context-parallel chunks back together if needed.
+            if self.dit.is_context_parallel_enabled:
+                samples = cat_outputs_cp(samples, seq_dim=2, cp_group=self.get_context_parallel_group())
+
+            # Decode
+            video = self.decode(samples)  # shape: (B, C, T, H, W), possibly out of [-1, 1]
+
+            # Run video guardrail on the generated video and apply postprocessing
+            if self.video_guardrail_runner is not None:
+                # Clamp to safe range before normalization
+                video = video.clamp(-1.0, 1.0)
+                video_normalized = (video + 1) / 2  # [0, 1]
+
+                # Convert tensor to NumPy frames for guardrail processing
+                video_squeezed = video_normalized.squeeze(0)  # (C, T, H, W)
+                frames = (video_squeezed * 255).clamp(0, 255).to(torch.uint8)
+                frames = frames.permute(1, 2, 3, 0).cpu().numpy()  # (T, H, W, C)
+
+                # Run guardrail
+                processed_frames = guardrail_presets.run_video_guardrail(frames, self.video_guardrail_runner)
+                if processed_frames is None:
+                    return None
+                else:
+                    log.success("Passed guardrail on generated video")
+
+                # Convert processed frames back to tensor format
+                processed_video = torch.from_numpy(processed_frames).float().permute(3, 0, 1, 2) / 255.0
+                processed_video = processed_video * 2 - 1  # back to [-1, 1]
+                processed_video = processed_video.unsqueeze(0)
+
+                video = processed_video.to(video.device, dtype=video.dtype)
+
+            log.success("Video generation completed successfully")
+            return video

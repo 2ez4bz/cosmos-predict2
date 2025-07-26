@@ -271,7 +271,7 @@ def process_single_generation(
     seed: int,
     benchmark: bool = False,
     use_cuda_graphs: bool = False,
-    device: str = "cuda",
+    #device: str = "cuda",
 ) -> bool:
     # Validate input file
     if not validate_input_file(input_path, num_conditional_frames):
@@ -295,7 +295,7 @@ def process_single_generation(
             guidance=guidance,
             seed=seed,
             use_cuda_graphs=use_cuda_graphs,
-            device=device,
+            #device=device,
         )
         if benchmark and i > 0:
             torch.cuda.synchronize()
@@ -356,7 +356,7 @@ def generate_video(args: argparse.Namespace, pipe: Video2WorldPipeline) -> None:
                 seed=args.seed,
                 benchmark=args.benchmark,
                 use_cuda_graphs=args.use_cuda_graphs,
-                device=args.device,
+                #device=args.device,
             )
     else:
         process_single_generation(
@@ -371,7 +371,7 @@ def generate_video(args: argparse.Namespace, pipe: Video2WorldPipeline) -> None:
             seed=args.seed,
             benchmark=args.benchmark,
             use_cuda_graphs=args.use_cuda_graphs,
-            device=args.device,
+            #device=args.device,
         )
 
     return

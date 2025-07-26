@@ -14,6 +14,7 @@
 # limitations under the License.
 
 import numpy as np
+import torch
 
 from cosmos_predict2.auxiliary.guardrail.blocklist.blocklist import Blocklist
 from cosmos_predict2.auxiliary.guardrail.common.core import GuardrailRunner
@@ -25,23 +26,31 @@ from cosmos_predict2.auxiliary.guardrail.video_content_safety_filter.video_conte
 from imaginaire.utils import log
 
 
-def create_text_guardrail_runner(checkpoint_dir: str, offload_model_to_cpu: bool) -> GuardrailRunner:
+def create_text_guardrail_runner(
+    checkpoint_dir: str, offload_model_to_cpu: bool, device: str | torch.device = "cuda"
+) -> GuardrailRunner:
     """Create the text guardrail runner."""
     return GuardrailRunner(
         safety_models=[
             Blocklist(checkpoint_dir=checkpoint_dir),
-            LlamaGuard3(checkpoint_dir=checkpoint_dir, offload_model_to_cpu=offload_model_to_cpu),
+            LlamaGuard3(checkpoint_dir=checkpoint_dir, offload_model_to_cpu=offload_model_to_cpu, device=device),
         ]
     )
 
 
-def create_video_guardrail_runner(checkpoint_dir: str, offload_model_to_cpu: bool) -> GuardrailRunner:
+def create_video_guardrail_runner(
+    checkpoint_dir: str, offload_model_to_cpu: bool, device: str | torch.device = "cuda"
+) -> GuardrailRunner:
     """Create the video guardrail runner."""
     return GuardrailRunner(
         safety_models=[
-            VideoContentSafetyFilter(checkpoint_dir=checkpoint_dir, offload_model_to_cpu=offload_model_to_cpu)
+            VideoContentSafetyFilter(
+                checkpoint_dir=checkpoint_dir, offload_model_to_cpu=offload_model_to_cpu, device=device
+            )
         ],
-        postprocessors=[RetinaFaceFilter(checkpoint_dir=checkpoint_dir, offload_model_to_cpu=offload_model_to_cpu)],
+        postprocessors=[
+            RetinaFaceFilter(checkpoint_dir=checkpoint_dir, offload_model_to_cpu=offload_model_to_cpu, device=device)
+        ],
     )
 
 

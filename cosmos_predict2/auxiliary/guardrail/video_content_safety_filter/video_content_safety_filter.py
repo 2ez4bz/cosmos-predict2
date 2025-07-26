@@ -44,14 +44,17 @@ class VideoContentSafetyFilter(ContentSafetyGuardrail):
         self,
         checkpoint_dir: str,
         offload_model_to_cpu: bool = True,
+        device: str | torch.device = "cuda",
     ) -> None:
         """Video content safety filter model.
 
         Args:
             checkpoint_dir (str): Path to the checkpoint directory.
             offload_model_to_cpu (bool, optional): Whether to offload the model to CPU. Defaults to True.
+            device (str | torch.device, optional): The device to load the model on. Defaults to "cuda".
         """
         self.offload_model = offload_model_to_cpu
+        self.device = torch.device(device)
         self.dtype = torch.float32
 
         self.checkpoint_dir = os.path.join(checkpoint_dir, "nvidia/Cosmos-Guardrail1/video_content_safety_filter")
@@ -64,26 +67,28 @@ class VideoContentSafetyFilter(ContentSafetyGuardrail):
         safety_filter_local_path = os.path.join(self.checkpoint_dir, "safety_filter.pt")
         checkpoint = torch.load(safety_filter_local_path, map_location=torch.device("cpu"), weights_only=True)
         self.model.load_state_dict(checkpoint["model"])
-        self.encoder = SigLIPEncoder(checkpoint_dir=self.checkpoint_dir, device="cuda", dtype=self.dtype)
+        self.encoder = SigLIPEncoder(checkpoint_dir=self.checkpoint_dir, device=self.device, dtype=self.dtype)
         if offload_model_to_cpu:
             self.encoder.to("cpu")
             self.model = self.model.to("cpu", dtype=self.dtype).eval()
             log.debug("Moved video content safety filter to CPU")
         else:
-            self.encoder.to("cuda")
-            self.model = self.model.to("cuda", dtype=self.dtype).eval()
-            log.debug("Moved video content safety filter to GPU")
+            self.encoder.to(self.device)
+            self.model = self.model.to(self.device, dtype=self.dtype).eval()
+            log.debug(f"Moved video content safety filter to {self.device}")
 
     @torch.inference_mode()
-    def __infer(self, pil_image: Image.Image) -> int:
-        """Infer the class of the image."""
-        image_embs = self.encoder.encode_image(pil_image)
-        logits = self.model.network(image_embs)
-        probabilities = torch.nn.functional.softmax(logits, dim=-1)
-        predicted_class = torch.argmax(probabilities, dim=-1).item()
+    def __infer(self, pil_image: Image) -> int:
+        """Run inference on a single image."""
+        with torch.no_grad():
+            image_features = self.encoder(pil_image)
+            image_features = image_features.to(self.model.device)
+            outputs = self.model(image_features)
+            predicted_class = torch.argmax(outputs, dim=1).item()
         return predicted_class
 
     def _to_cuda_if_offload(self):
+        """Move the model to CUDA if it is offloaded."""
         if self.offload_model:
             self.encoder = self.encoder.to("cuda")
             self.model = self.model.to("cuda")

@@ -48,6 +48,7 @@ class RetinaFaceFilter(PostprocessingGuardrail):
         batch_size: int = 1,
         confidence_threshold: float = 0.7,
         offload_model_to_cpu: bool = True,
+        device: str | torch.device = "cuda",
     ) -> None:
         """
         Initialize the RetinaFace model for face detection and blurring.
@@ -57,11 +58,13 @@ class RetinaFaceFilter(PostprocessingGuardrail):
             batch_size: Batch size for RetinaFace inference and processing
             confidence_threshold: Minimum confidence score to consider a face detection
             offload_model_to_cpu (bool, optional): Whether to offload the model to CPU. Defaults to True.
+            device (str | torch.device, optional): The device to load the model on. Defaults to "cuda".
         """
         self.checkpoint = f"{checkpoint_dir}/nvidia/Cosmos-Guardrail1/face_blur_filter/Resnet50_Final.pth"
         self.cfg = cfg_re50
         self.batch_size = batch_size
         self.confidence_threshold = confidence_threshold
+        self.device = torch.device(device)
         self.dtype = torch.float32
         self.offload_model = offload_model_to_cpu
 
@@ -74,8 +77,8 @@ class RetinaFaceFilter(PostprocessingGuardrail):
         # Load from RetinaFace pretrained checkpoint
         if not offload_model_to_cpu:
             self.net = load_model(self.net, self.checkpoint, False)
-            self.net.to("cuda", dtype=self.dtype).eval()
-            log.debug("Moved face blur filter to GPU")
+            self.net.to(self.device, dtype=self.dtype).eval()
+            log.debug(f"Moved face blur filter to {self.device}")
         else:
             self.net = load_model(self.net, self.checkpoint, True)
             self.net.to("cpu", dtype=self.dtype).eval()
@@ -91,10 +94,10 @@ class RetinaFaceFilter(PostprocessingGuardrail):
             Preprocessed frames tensor
         """
         with torch.no_grad():
-            frames_tensor = torch.from_numpy(frames).to("cuda", dtype=self.dtype)  # Shape: [T, H, W, C]
+            frames_tensor = torch.from_numpy(frames).to(self.device, dtype=self.dtype)  # Shape: [T, H, W, C]
             frames_tensor = frames_tensor.permute(0, 3, 1, 2)  # Shape: [T, C, H, W]
             frames_tensor = frames_tensor[:, [2, 1, 0], :, :]  # RGB to BGR to match RetinaFace model input
-            means = torch.tensor([104.0, 117.0, 123.0], device="cuda", dtype=self.dtype).view(1, 3, 1, 1)
+            means = torch.tensor([104.0, 117.0, 123.0], device=self.device, dtype=self.dtype).view(1, 3, 1, 1)
             frames_tensor = frames_tensor - means  # Subtract mean BGR values for each channel
             return frames_tensor
 
@@ -164,7 +167,9 @@ class RetinaFaceFilter(PostprocessingGuardrail):
         # Create dataset and dataloader
         if self.offload_model:
             self.net = self.net.to("cuda")
-            log.debug("Move face blur filter to GPU")
+            if self.offload_model:
+                self.net = self.net.to(self.device)
+                log.debug(f"Move face blur filter to {self.device}")
         frames_tensor = self.preprocess_frames(frames)
         dataset = TensorDataset(frames_tensor)
         dataloader = DataLoader(dataset, batch_size=self.batch_size, shuffle=False)
@@ -180,13 +185,13 @@ class RetinaFaceFilter(PostprocessingGuardrail):
                 if prior_data is None:
                     priorbox = PriorBox(self.cfg, image_size=(h, w))
                     priors = priorbox.forward()
-                    priors = priors.to("cuda", dtype=self.dtype)
+                    priors = priors.to(self.device, dtype=self.dtype)
                     prior_data = priors.data
 
                 # Get scale for resizing detections
                 if scale is None:
                     scale = torch.Tensor([w, h, w, h])
-                    scale = scale.to("cuda", dtype=self.dtype)
+                    scale = scale.to(self.device, dtype=self.dtype)
 
                 batch_loc, batch_conf, _ = self.net(batch)
 

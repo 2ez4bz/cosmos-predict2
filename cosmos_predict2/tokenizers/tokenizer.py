@@ -739,6 +739,7 @@ class TokenizerInterface(VideoTokenizerInterface):
             device=kwargs.get("device", "cuda"),
         )
         self.chunk_duration = chunk_duration
+        del kwargs
 
     @property
     def dtype(self):
