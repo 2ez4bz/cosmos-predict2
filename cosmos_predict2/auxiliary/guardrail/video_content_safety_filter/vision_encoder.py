@@ -42,3 +42,7 @@ class SigLIPEncoder(torch.nn.Module):
             image_features = self.model.get_image_features(**inputs)
             image_features /= image_features.norm(dim=-1, keepdim=True)
         return image_features
+
+    def forward(self, input_img: Image.Image) -> torch.Tensor:
+        """Forward pass for the encoder."""
+        return self.encode_image(input_img)

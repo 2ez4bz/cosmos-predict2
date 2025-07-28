@@ -48,13 +48,14 @@ class SafetyClassifier(nn.Module):
 
 
 class VideoSafetyModel(nn.Module):
-    def __init__(self, config: ModelConfig) -> None:
+    def __init__(self, config: ModelConfig, device: str = "cuda") -> None:
         super().__init__()
         self.config = config
+        self.device = device
         self.num_classes = config.num_classes
         self.network = SafetyClassifier(input_size=config.input_size, num_classes=self.num_classes)
 
     @torch.inference_mode()
-    def forward(self, data_batch: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
-        logits = self.network(data_batch["data"].cuda())
-        return {"logits": logits}
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        logits = self.network(x.to(self.device))
+        return logits

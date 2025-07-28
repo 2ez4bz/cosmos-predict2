@@ -63,7 +63,7 @@ class VideoContentSafetyFilter(ContentSafetyGuardrail):
         model_config = ModelConfig(input_size=1152, num_classes=7)
 
         # Load the multi-class classifier and initialize the SigLIP encoder
-        self.model = VideoSafetyModel(model_config)
+        self.model = VideoSafetyModel(model_config, device=self.device)
         safety_filter_local_path = os.path.join(self.checkpoint_dir, "safety_filter.pt")
         checkpoint = torch.load(safety_filter_local_path, map_location=torch.device("cpu"), weights_only=True)
         self.model.load_state_dict(checkpoint["model"])
