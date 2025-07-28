@@ -784,74 +784,74 @@ class Video2WorldPipeline(BasePipeline):
         seed: int = 0,
         use_cuda_graphs: bool = False,
     ) -> torch.Tensor | None:
-        with torch.cuda.device(self.device):
-            # Parameter check
-            width, height = VIDEO_RES_SIZE_INFO[self.config.resolution][aspect_ratio]
-            height, width = self.check_resize_height_width(height, width)
-            assert num_conditional_frames in [1, 5], "num_conditional_frames must be 1 or 5"
-            num_latent_conditional_frames = self.tokenizer.get_latent_num_frames(num_conditional_frames)
+        # Parameter check
+        width, height = VIDEO_RES_SIZE_INFO[self.config.resolution][aspect_ratio]
+        height, width = self.check_resize_height_width(height, width)
+        assert num_conditional_frames in [1, 5], "num_conditional_frames must be 1 or 5"
+        num_latent_conditional_frames = self.tokenizer.get_latent_num_frames(num_conditional_frames)
 
-            # Run text guardrail on the prompt
+        # Run text guardrail on the prompt
+        if self.text_guardrail_runner is not None:
+            from cosmos_predict2.auxiliary.guardrail.common import presets as guardrail_presets
+
+            log.info("Running guardrail check on prompt...")
+            if not guardrail_presets.run_text_guardrail(prompt, self.text_guardrail_runner):
+                return None
+            else:
+                log.success("Passed guardrail on prompt")
+        elif self.text_guardrail_runner is None:
+            log.warning("Guardrail checks on prompt are disabled")
+
+        # refine prompt only if prompt refiner is enabled
+        if (
+            hasattr(self, "prompt_refiner")
+            and self.prompt_refiner is not None
+            and getattr(self.config, "prompt_refiner_config", None)
+            and getattr(self.config.prompt_refiner_config, "enabled", False)
+        ):
+            log.info("Starting prompt refinement...")
+            prompt = self.prompt_refiner.refine_prompt(input_path, prompt)
+            log.info("Finished prompt refinement")
+
+            # Run text guardrail on the refined prompt
             if self.text_guardrail_runner is not None:
-                from cosmos_predict2.auxiliary.guardrail.common import presets as guardrail_presets
-
-                log.info("Running guardrail check on prompt...")
+                log.info("Running guardrail check on refined prompt...")
                 if not guardrail_presets.run_text_guardrail(prompt, self.text_guardrail_runner):
                     return None
                 else:
-                    log.success("Passed guardrail on prompt")
+                    log.success("Passed guardrail on refined prompt")
             elif self.text_guardrail_runner is None:
-                log.warning("Guardrail checks on prompt are disabled")
+                log.warning("Guardrail checks on refined prompt are disabled")
+        elif (
+            hasattr(self, "config")
+            and hasattr(self.config, "prompt_refiner_config")
+            and not self.config.prompt_refiner_config.enabled
+        ):
+            log.warning("Prompt refinement is disabled")
 
-            # refine prompt only if prompt refiner is enabled
-            if (
-                hasattr(self, "prompt_refiner")
-                and self.prompt_refiner is not None
-                and getattr(self.config, "prompt_refiner_config", None)
-                and getattr(self.config.prompt_refiner_config, "enabled", False)
-            ):
-                log.info("Starting prompt refinement...")
-                prompt = self.prompt_refiner.refine_prompt(input_path, prompt)
-                log.info("Finished prompt refinement")
+        num_video_frames = self.tokenizer.get_pixel_num_frames(self.config.state_t)
 
-                # Run text guardrail on the refined prompt
-                if self.text_guardrail_runner is not None:
-                    log.info("Running guardrail check on refined prompt...")
-                    if not guardrail_presets.run_text_guardrail(prompt, self.text_guardrail_runner):
-                        return None
-                    else:
-                        log.success("Passed guardrail on refined prompt")
-                elif self.text_guardrail_runner is None:
-                    log.warning("Guardrail checks on refined prompt are disabled")
-            elif (
-                hasattr(self, "config")
-                and hasattr(self.config, "prompt_refiner_config")
-                and not self.config.prompt_refiner_config.enabled
-            ):
-                log.warning("Prompt refinement is disabled")
-
-            num_video_frames = self.tokenizer.get_pixel_num_frames(self.config.state_t)
-
-            # Detect file extension to determine appropriate reading function
-            ext = os.path.splitext(input_path)[1].lower()
-            if ext in _VIDEO_EXTENSIONS:
-                # Always use video reading for video files, regardless of num_latent_conditional_frames
-                vid_input = read_and_process_video(
-                    input_path, [height, width], num_video_frames, num_latent_conditional_frames, resize=True
-                )
-            elif ext in _IMAGE_EXTENSIONS:
-                if num_latent_conditional_frames == 1:
-                    # Use image reading for single frame conditioning with image files
-                    vid_input = read_and_process_image(input_path, [height, width], num_video_frames, resize=True)
-                else:
-                    raise ValueError(
-                        f"Cannot use multi-frame conditioning (num_conditional_frames={num_conditional_frames}) with image input. Please provide a video file."
-                    )
+        # Detect file extension to determine appropriate reading function
+        ext = os.path.splitext(input_path)[1].lower()
+        if ext in _VIDEO_EXTENSIONS:
+            # Always use video reading for video files, regardless of num_latent_conditional_frames
+            vid_input = read_and_process_video(
+                input_path, [height, width], num_video_frames, num_latent_conditional_frames, resize=True
+            )
+        elif ext in _IMAGE_EXTENSIONS:
+            if num_latent_conditional_frames == 1:
+                # Use image reading for single frame conditioning with image files
+                vid_input = read_and_process_image(input_path, [height, width], num_video_frames, resize=True)
             else:
                 raise ValueError(
-                    f"Unsupported file extension: {ext}. Supported extensions are {_IMAGE_EXTENSIONS + _VIDEO_EXTENSIONS}"
+                    f"Cannot use multi-frame conditioning (num_conditional_frames={num_conditional_frames}) with image input. Please provide a video file."
                 )
+        else:
+            raise ValueError(
+                f"Unsupported file extension: {ext}. Supported extensions are {_IMAGE_EXTENSIONS + _VIDEO_EXTENSIONS}"
+            )
 
+        with torch.cuda.device(self.device):
             # Prepare the data batch with text embeddings
             data_batch = self._get_data_batch_input(
                 vid_input, prompt, negative_prompt, num_latent_conditional_frames=num_latent_conditional_frames
@@ -935,30 +935,30 @@ class Video2WorldPipeline(BasePipeline):
             # Decode
             video = self.decode(samples)  # shape: (B, C, T, H, W), possibly out of [-1, 1]
 
-            # Run video guardrail on the generated video and apply postprocessing
-            if self.video_guardrail_runner is not None:
-                # Clamp to safe range before normalization
-                video = video.clamp(-1.0, 1.0)
-                video_normalized = (video + 1) / 2  # [0, 1]
+        # Run video guardrail on the generated video and apply postprocessing
+        if self.video_guardrail_runner is not None:
+            # Clamp to safe range before normalization
+            video = video.clamp(-1.0, 1.0)
+            video_normalized = (video + 1) / 2  # [0, 1]
 
-                # Convert tensor to NumPy frames for guardrail processing
-                video_squeezed = video_normalized.squeeze(0)  # (C, T, H, W)
-                frames = (video_squeezed * 255).clamp(0, 255).to(torch.uint8)
-                frames = frames.permute(1, 2, 3, 0).cpu().numpy()  # (T, H, W, C)
+            # Convert tensor to NumPy frames for guardrail processing
+            video_squeezed = video_normalized.squeeze(0)  # (C, T, H, W)
+            frames = (video_squeezed * 255).clamp(0, 255).to(torch.uint8)
+            frames = frames.permute(1, 2, 3, 0).cpu().numpy()  # (T, H, W, C)
 
-                # Run guardrail
-                processed_frames = guardrail_presets.run_video_guardrail(frames, self.video_guardrail_runner)
-                if processed_frames is None:
-                    return None
-                else:
-                    log.success("Passed guardrail on generated video")
+            # Run guardrail
+            processed_frames = guardrail_presets.run_video_guardrail(frames, self.video_guardrail_runner)
+            if processed_frames is None:
+                return None
+            else:
+                log.success("Passed guardrail on generated video")
 
-                # Convert processed frames back to tensor format
-                processed_video = torch.from_numpy(processed_frames).float().permute(3, 0, 1, 2) / 255.0
-                processed_video = processed_video * 2 - 1  # back to [-1, 1]
-                processed_video = processed_video.unsqueeze(0)
+            # Convert processed frames back to tensor format
+            processed_video = torch.from_numpy(processed_frames).float().permute(3, 0, 1, 2) / 255.0
+            processed_video = processed_video * 2 - 1  # back to [-1, 1]
+            processed_video = processed_video.unsqueeze(0)
 
-                video = processed_video.to(video.device, dtype=video.dtype)
+            video = processed_video.to(video.device, dtype=video.dtype)
 
-            log.success("Video generation completed successfully")
-            return video
+        log.success("Video generation completed successfully")
+        return video
