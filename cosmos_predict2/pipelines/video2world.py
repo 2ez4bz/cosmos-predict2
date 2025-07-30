@@ -274,7 +274,6 @@ class Video2WorldPipeline(BasePipeline):
         self.height_division_factor = 16
         self.width_division_factor = 16
         self.use_unified_sequence_parallel = False
-        self.device = torch.device(device)
 
     @staticmethod
     def from_config(
@@ -287,14 +286,14 @@ class Video2WorldPipeline(BasePipeline):
     ) -> Any:
         # Create a pipe
         pipe = Video2WorldPipeline(device=device, torch_dtype=torch_dtype)
-        config.tokenizer.device = pipe.device
+        config.tokenizer.device = device
         pipe.config = config
         pipe.precision = {
             "float32": torch.float32,
             "float16": torch.float16,
             "bfloat16": torch.bfloat16,
         }[config.precision]
-        pipe.tensor_kwargs = {"device": pipe.device, "dtype": pipe.precision}
+        pipe.tensor_kwargs = {"device": device, "dtype": pipe.precision}
         log.warning(f"precision {pipe.precision}")
 
         # 1. set data keys and data information
@@ -321,7 +320,7 @@ class Video2WorldPipeline(BasePipeline):
         if text_encoder_path:
             # inference
             pipe.text_encoder = CosmosT5TextEncoder(device=pipe.device, cache_dir=text_encoder_path)
-            pipe.text_encoder.to(pipe.device)
+            pipe.text_encoder.to(device)
         else:
             # training
             pipe.text_encoder = None
@@ -387,7 +386,7 @@ class Video2WorldPipeline(BasePipeline):
             # Actual state_dict should be loaded after the pipe is created.
             pipe.dit_ema_worker.copy_to(src_model=pipe.dit, tgt_model=pipe.dit_ema)
 
-        pipe.dit = pipe.dit.to(device=pipe.device, dtype=torch_dtype)
+        pipe.dit = pipe.dit.to(device=device, dtype=torch_dtype)
         torch.cuda.empty_cache()
 
         # 7. training states
@@ -851,7 +850,7 @@ class Video2WorldPipeline(BasePipeline):
                 f"Unsupported file extension: {ext}. Supported extensions are {_IMAGE_EXTENSIONS + _VIDEO_EXTENSIONS}"
             )
 
-        with torch.cuda.device(self.device):
+        with torch.cuda.device(self.tensor_kwargs["device"]):
             # Prepare the data batch with text embeddings
             data_batch = self._get_data_batch_input(
                 vid_input, prompt, negative_prompt, num_latent_conditional_frames=num_latent_conditional_frames

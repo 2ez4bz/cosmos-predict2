@@ -164,9 +164,6 @@ def parse_args() -> argparse.Namespace:
         help="Run the generation in benchmark mode. It means that generation will be rerun a few times and the average generation time will be shown.",
     )
     parser.add_argument("--use_cuda_graphs", action="store_true", help="Use CUDA Graphs for the text2image inference.")
-    parser.add_argument(
-        "--device", type=str, default="cuda:1", help="Device to use for inference (e.g., 'cuda:0', 'cuda:1')"
-    )
     return parser.parse_args()
 
 
@@ -247,7 +244,7 @@ def setup_pipeline(args: argparse.Namespace, text_encoder=None):
         config=config,
         dit_path=dit_path,
         text_encoder_path=text_encoder_path,
-        device=args.device,
+        device="cuda",
         torch_dtype=torch.bfloat16,
         load_prompt_refiner=True,
     )
