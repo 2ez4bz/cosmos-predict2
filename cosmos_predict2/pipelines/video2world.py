@@ -319,7 +319,7 @@ class Video2WorldPipeline(BasePipeline):
         # 4. Load text encoder
         if text_encoder_path:
             # inference
-            pipe.text_encoder = CosmosT5TextEncoder(device=pipe.device, cache_dir=text_encoder_path)
+            pipe.text_encoder = CosmosT5TextEncoder(device=device, cache_dir=text_encoder_path)
             pipe.text_encoder.to(device)
         else:
             # training
